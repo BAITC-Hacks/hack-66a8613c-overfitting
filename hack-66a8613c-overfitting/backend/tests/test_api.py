@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from backend.app import config
 from backend.app.main import app
 from backend.app.database import connect
+from backend.app.processing.analysis import AnalysisDraft
 
 
 class ApiTests(unittest.TestCase):
@@ -85,7 +86,7 @@ class ApiTests(unittest.TestCase):
             write_wav(target)
             return PreparedAudio(target, 1)
         from backend.app.processing.contracts import Transcription
-        with patch.object(app.state.service.preparer, 'prepare', side_effect=prepare), patch.object(app.state.service.transcriber, 'transcribe', return_value=Transcription(segments=[])), patch.object(app.state.service.diarizer, 'diarize', return_value=[]):
+        with patch.object(app.state.service.preparer, 'prepare', side_effect=prepare), patch.object(app.state.service.transcriber, 'transcribe', return_value=Transcription(segments=[])), patch.object(app.state.service.diarizer, 'diarize', return_value=[]), patch.object(app.state.service.analyzer, 'analyze', return_value=AnalysisDraft(summary='', key_points=[], topics=[])):
             response = self.upload()
         self.assertEqual(response.json()['status'], 'queued')
         meeting_id = response.json()['meeting_id']

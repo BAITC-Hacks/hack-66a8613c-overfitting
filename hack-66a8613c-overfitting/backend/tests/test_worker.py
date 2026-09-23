@@ -17,6 +17,7 @@ from backend.app.service import MeetingService
 from backend.app.sources.storage import MeetingStorage
 from backend.tests.test_audio import write_wav
 from backend.app.processing.contracts import Transcription
+from backend.app.processing.analysis import AnalysisDraft
 
 
 class WorkerTests(unittest.TestCase):
@@ -27,7 +28,8 @@ class WorkerTests(unittest.TestCase):
         database = root / 'meetings.sqlite3'
         initialize_database(database)
         self.service = MeetingService(MeetingStorage(root), MeetingRepository(database), AudioPreparer('ffmpeg', 'ffprobe'),
-                                      Mock(transcribe=Mock(return_value=Transcription(segments=[]))), Mock(diarize=Mock(return_value=[])))
+                                      Mock(transcribe=Mock(return_value=Transcription(segments=[]))), Mock(diarize=Mock(return_value=[])),
+                                      Mock(analyze=Mock(return_value=AnalysisDraft(summary='', key_points=[], topics=[]))))
 
     def upload(self):
         return asyncio.run(self.service.upload(UploadFile(BytesIO(b'test'), filename='x.wav'), 'Test', None, None, 100)).meeting_id

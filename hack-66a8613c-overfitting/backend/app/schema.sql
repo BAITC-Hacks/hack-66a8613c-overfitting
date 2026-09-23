@@ -12,11 +12,11 @@ CREATE TABLE IF NOT EXISTS source_files (
 );
 CREATE TABLE IF NOT EXISTS processing_jobs (
     id TEXT PRIMARY KEY, meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
-    status TEXT NOT NULL CHECK(status IN ('queued','preparing_audio','ready_for_models','transcribing','diarizing','saving_transcript','ready','failed')),
+    status TEXT NOT NULL CHECK(status IN ('queued','preparing_audio','ready_for_models','transcribing','diarizing','saving_transcript','analyzing','ready','failed')),
     stage TEXT, error_code TEXT, audio_path TEXT, detected_language TEXT
 );
 CREATE UNIQUE INDEX IF NOT EXISTS one_processing_job ON processing_jobs((1))
-WHERE status IN ('preparing_audio','transcribing','diarizing','saving_transcript') OR (status='ready_for_models' AND stage='models');
+WHERE status IN ('preparing_audio','transcribing','diarizing','saving_transcript','analyzing') OR (status='ready_for_models' AND stage='models');
 CREATE TABLE IF NOT EXISTS speakers (
     id TEXT PRIMARY KEY, meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
     label TEXT NOT NULL, name TEXT, UNIQUE(meeting_id, id), UNIQUE(meeting_id, label)
@@ -59,4 +59,38 @@ CREATE TABLE IF NOT EXISTS action_items (
 CREATE TABLE IF NOT EXISTS exports (
     id TEXT PRIMARY KEY, meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
     format TEXT NOT NULL CHECK(format IN ('docx','pdf')), storage_path TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS analyses (
+    meeting_id TEXT PRIMARY KEY REFERENCES meetings(id) ON DELETE CASCADE,
+    requires_review INTEGER NOT NULL CHECK(requires_review IN (0,1))
+);
+CREATE TABLE IF NOT EXISTS key_points (
+    id TEXT PRIMARY KEY, meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL CHECK(position >= 1), direction TEXT NOT NULL,
+    metric TEXT NOT NULL, problem TEXT NOT NULL,
+    requires_review INTEGER NOT NULL CHECK(requires_review IN (0,1)),
+    UNIQUE(meeting_id,id), UNIQUE(meeting_id,position)
+);
+CREATE TABLE IF NOT EXISTS topic_sources (
+    meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+    topic_id TEXT NOT NULL, utterance_id TEXT NOT NULL,
+    PRIMARY KEY(meeting_id,topic_id,utterance_id),
+    FOREIGN KEY(meeting_id,topic_id) REFERENCES topics(meeting_id,id) ON DELETE CASCADE,
+    FOREIGN KEY(meeting_id,utterance_id) REFERENCES utterances(meeting_id,id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS action_sources (
+    meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+    action_id TEXT NOT NULL REFERENCES action_items(id) ON DELETE CASCADE,
+    utterance_id TEXT NOT NULL,
+    PRIMARY KEY(meeting_id,action_id,utterance_id),
+    FOREIGN KEY(meeting_id,action_id) REFERENCES action_items(meeting_id,id) ON DELETE CASCADE,
+    FOREIGN KEY(meeting_id,utterance_id) REFERENCES utterances(meeting_id,id) ON DELETE CASCADE
+);
+CREATE UNIQUE INDEX IF NOT EXISTS action_meeting_id ON action_items(meeting_id,id);
+CREATE TABLE IF NOT EXISTS key_point_sources (
+    meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+    key_point_id TEXT NOT NULL, utterance_id TEXT NOT NULL,
+    PRIMARY KEY(meeting_id,key_point_id,utterance_id),
+    FOREIGN KEY(meeting_id,key_point_id) REFERENCES key_points(meeting_id,id) ON DELETE CASCADE,
+    FOREIGN KEY(meeting_id,utterance_id) REFERENCES utterances(meeting_id,id) ON DELETE CASCADE
 );

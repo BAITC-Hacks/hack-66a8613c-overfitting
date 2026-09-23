@@ -12,17 +12,21 @@ from . import config
 from .processing.adapters import FasterWhisperAdapter, PyannoteAdapter
 from .processing.contracts import Transcriber, Diarizer
 from .processing.alignment import merge_transcript
+from .processing.analysis import Analyzer
+from .processing.ollama import OllamaAdapter
 
 
 class MeetingService:
     def __init__(self, storage: MeetingStorage, repository: MeetingRepository, preparer: AudioPreparer,
-                 transcriber: Transcriber | None = None, diarizer: Diarizer | None = None):
+                 transcriber: Transcriber | None = None, diarizer: Diarizer | None = None,
+                 analyzer: Analyzer | None = None):
         self.storage = storage
         self.repository = repository
         self.preparer = preparer
         self.worker_lock = Lock()
         self.transcriber = transcriber if transcriber is not None else FasterWhisperAdapter(config.WHISPER_MODEL_PATH)
         self.diarizer = diarizer if diarizer is not None else PyannoteAdapter(config.PYANNOTE_MODEL_PATH)
+        self.analyzer = analyzer if analyzer is not None else OllamaAdapter(config.OLLAMA_BASE_URL, config.OLLAMA_MODEL)
 
     async def upload(self, file, title, meeting_date, timezone, limit):
         from pydantic import ValidationError
@@ -68,6 +72,10 @@ class MeetingService:
                 self.repository.update(meeting_id, 'saving_transcript', stage='alignment')
                 speakers, utterances = merge_transcript(meeting_id, transcription.segments, turns)
                 self.repository.save_transcript(meeting_id, speakers, utterances, transcription.detected_language)
+                failure_code = 'analysis_failed'
+                saved = self.repository.result(meeting_id)
+                analysis = self.analyzer.analyze(saved.utterances, saved.speakers)
+                self.repository.save_analysis(meeting_id, analysis)
             except Exception as exc:
                 code = exc.code if isinstance(exc, LocalError) else failure_code
                 # Never log subprocess errors, file names, or user metadata.

@@ -17,6 +17,7 @@ class JobStatus(StrEnum):
     transcribing = 'transcribing'
     diarizing = 'diarizing'
     saving_transcript = 'saving_transcript'
+    analyzing = 'analyzing'
     ready = 'ready'
     failed = 'failed'
 
@@ -84,21 +85,14 @@ class Utterance(Schema):
         return self
 
 
-class PreparationResult(Schema):
-    meeting: Meeting
-    job: ProcessingJob
-    models_connected: bool = False
-    detected_language: str | None = None
-    speakers: list[Speaker] = Field(default_factory=list)
-    utterances: list[Utterance] = Field(default_factory=list)
-
-
 class Topic(Schema):
     id: str
     meeting_id: str
     position: int = Field(ge=1)
     title: str
     summary: str
+    source_utterance_ids: list[str] = Field(default_factory=list)
+    requires_review: bool = True
 
 
 class Metric(Schema):
@@ -124,6 +118,33 @@ class ActionItem(Schema):
     utterance_id: str
     timestamp_seconds: float = Field(ge=0)
     requires_review: bool
+    source_utterance_ids: list[str] = Field(default_factory=list)
+
+
+class KeyPoint(Schema):
+    id: str
+    meeting_id: str
+    position: int
+    direction: str
+    metric: str
+    problem: str
+    source_utterance_ids: list[str] = Field(default_factory=list)
+    requires_review: bool = True
+
+
+class PreparationResult(Schema):
+    meeting: Meeting
+    job: ProcessingJob
+    models_connected: bool = False
+    detected_language: str | None = None
+    speakers: list[Speaker] = Field(default_factory=list)
+    utterances: list[Utterance] = Field(default_factory=list)
+    summary: str = ''
+    analysis_completed: bool = False
+    requires_review: bool = True
+    key_points: list[KeyPoint] = Field(default_factory=list)
+    topics: list[Topic] = Field(default_factory=list)
+    action_items: list[ActionItem] = Field(default_factory=list)
 
 
 class Export(Schema):

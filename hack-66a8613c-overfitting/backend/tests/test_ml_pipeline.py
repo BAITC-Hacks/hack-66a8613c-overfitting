@@ -15,6 +15,7 @@ from backend.app.main import app
 from backend.app.processing.audio import PreparedAudio
 from backend.app.processing.contracts import AsrSegment, DiarizationTurn, Transcription
 from backend.app.processing.adapters import FasterWhisperAdapter
+from backend.app.processing.analysis import AnalysisDraft
 from backend.app.repository import MeetingRepository
 from backend.app.schemas import Speaker, Utterance
 from backend.app.service import MeetingService
@@ -34,7 +35,8 @@ class PipelineTests(unittest.TestCase):
             segments=[AsrSegment(start=0, end=1, text='unit fixture'), AsrSegment(start=1, end=2, text='second fixture')], detected_language='kk')))
         self.diarizer = Mock(diarize=Mock(return_value=[DiarizationTurn(start=0, end=1, speaker='A'), DiarizationTurn(start=1, end=2, speaker='B')]))
         self.preparer = Mock(prepare=Mock(side_effect=self.prepare_audio))
-        self.service = MeetingService(MeetingStorage(self.root), self.repository, self.preparer, self.transcriber, self.diarizer)
+        self.analyzer = Mock(analyze=Mock(return_value=AnalysisDraft(summary='unit summary', key_points=[], topics=[])))
+        self.service = MeetingService(MeetingStorage(self.root), self.repository, self.preparer, self.transcriber, self.diarizer, self.analyzer)
 
     def prepare_audio(self, source, target):
         target.write_bytes(b'not real audio; adapters are mocked')
@@ -98,7 +100,7 @@ class PipelineTests(unittest.TestCase):
 
     def test_deletion_is_blocked_through_all_ml_stages(self):
         meeting_id = self.upload()
-        for status in ['ready_for_models', 'transcribing', 'diarizing', 'saving_transcript']:
+        for status in ['ready_for_models', 'transcribing', 'diarizing', 'saving_transcript', 'analyzing']:
             self.repository.update(meeting_id, status, stage='models')
             with self.assertRaises(LocalError) as error:
                 self.service.delete(meeting_id)

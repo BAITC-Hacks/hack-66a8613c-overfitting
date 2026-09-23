@@ -40,6 +40,21 @@ def initialize_database(path: Path) -> None:
                 WHERE status IN ('preparing_audio','transcribing','diarizing','saving_transcript') OR (status='ready_for_models' AND stage='models')""")
             connection.commit()
 
+        existing = connection.execute("SELECT sql FROM sqlite_master WHERE name='processing_jobs'").fetchone()[0]
+        if 'analyzing' not in existing:
+            connection.execute('BEGIN IMMEDIATE')
+            connection.execute('DROP INDEX IF EXISTS one_processing_job')
+            connection.execute('ALTER TABLE processing_jobs RENAME TO processing_jobs_transcription')
+            connection.execute("""CREATE TABLE processing_jobs (
+                id TEXT PRIMARY KEY, meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+                status TEXT NOT NULL CHECK(status IN ('queued','preparing_audio','ready_for_models','transcribing','diarizing','saving_transcript','analyzing','ready','failed')),
+                stage TEXT, error_code TEXT, audio_path TEXT, detected_language TEXT)""")
+            connection.execute('INSERT INTO processing_jobs SELECT * FROM processing_jobs_transcription')
+            connection.execute('DROP TABLE processing_jobs_transcription')
+            connection.execute("""CREATE UNIQUE INDEX one_processing_job ON processing_jobs((1))
+                WHERE status IN ('preparing_audio','transcribing','diarizing','saving_transcript','analyzing') OR (status='ready_for_models' AND stage='models')""")
+            connection.commit()
+
 
 @contextmanager
 def connect(path: Path):
