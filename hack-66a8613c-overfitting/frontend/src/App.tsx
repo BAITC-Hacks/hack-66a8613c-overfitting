@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { active, request, watchStatus, type Job, type MeetingResult } from './api';
+import { ReviewControls } from './ReviewControls';
 
 function timestamp(seconds: number) {
   const minutes = Math.floor(seconds / 60);
@@ -75,7 +76,7 @@ export function App() {
     <main>
       <h1>Протокол совещания</h1>
       <p className="intro">Загрузите запись для локального распознавания, саммари и извлечения поручений.</p>
-      <aside>Машинный транскрипт и анализ требуют проверки человеком. Правки и экспорт пока недоступны.</aside>
+      <aside>Проверьте машинный транскрипт и анализ. Экспорт доступен после утверждения результата человеком.</aside>
       <nav aria-label="Экраны приложения">
         <button aria-current={screen === 'upload' ? 'page' : undefined} onClick={() => setScreen('upload')}>1. Загрузка и статус</button>
         <button aria-current={screen === 'review' ? 'page' : undefined} onClick={() => setScreen('review')}>2. Результат подготовки</button>
@@ -106,6 +107,7 @@ export function App() {
         {job?.status === 'ready' && !result && !resultError && <p>Загрузка транскрипта…</p>}
         {resultError && <div role="alert"><p>{resultError}</p><button onClick={() => setResultAttempt(value => value + 1)}>Повторить загрузку транскрипта</button></div>}
         {result && <>
+          {job?.status === 'ready' && result.analysis_completed && <ReviewControls result={result} meetingId={job.meeting_id} busy={busy} onBusy={setBusy} onResult={setResult} />}
           {result.analysis_completed ? <>
             <h3>Саммари по ключевым пунктам</h3>
             {result.requires_review && <p className="review-label">Требует проверки</p>}
@@ -147,7 +149,7 @@ export function App() {
             </li>)}
           </ol>}
         </>}
-        <div className="actions"><button disabled>Сохранить правки</button><button disabled>Утвердить</button><button disabled>Скачать DOCX</button><button disabled>Скачать PDF</button>
+        <div className="actions">
           <button disabled={!job || busy || isActive} onClick={remove}>Удалить встречу</button></div>
         {isActive && <p className="hint">Удаление доступно после завершения обработки.</p>}
       </section>}

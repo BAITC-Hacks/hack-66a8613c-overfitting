@@ -8,6 +8,7 @@ export type Job = {
 };
 
 export type MeetingResult = {
+  meeting: { id: string; title: string; approved_at: string | null };
   job: Job;
   detected_language: string | null;
   speakers: { id: string; label: string; name: string | null }[];
@@ -19,6 +20,26 @@ export type MeetingResult = {
   topics: { id: string; position: number; title: string; summary: string; source_utterance_ids: string[]; requires_review: boolean }[];
   action_items: { id: string; topic_id: string; text: string; responsible: string; deadline_original: string; source_utterance_ids: string[]; requires_review: boolean }[];
 };
+
+export async function downloadExport(meetingId: string, format: 'docx' | 'pdf') {
+  const response = await fetch(`/api/meetings/${encodeURIComponent(meetingId)}/exports/${format}`);
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new Error(typeof body?.detail?.message === 'string' ? body.detail.message : `Не удалось скачать документ (HTTP ${response.status}).`);
+  }
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  // Never use user-provided meeting titles or response filenames as download paths.
+  link.download = `meeting-${meetingId.replace(/[^a-zA-Z0-9-]/g, '').slice(0, 36)}.${format}`;
+  document.body.append(link);
+  try { link.click(); } finally {
+    link.remove();
+    // Let the browser begin consuming the blob before releasing it.
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+}
 
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, init);

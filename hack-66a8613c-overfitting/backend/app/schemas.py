@@ -1,9 +1,10 @@
 """Contracts for future processing and editing; no fabricated model output."""
 from datetime import date, datetime
 from enum import StrEnum
+from typing import Annotated
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
 
 class Schema(BaseModel):
@@ -172,8 +173,50 @@ class MeetingResult(Schema):
         return self
 
 
-class MeetingEdits(Schema):
-    speakers: list[Speaker] = Field(default_factory=list)
-    utterances: list[Utterance] = Field(default_factory=list)
-    action_items: list[ActionItem] = Field(default_factory=list)
+EditText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=8000)]
+EntityId = Annotated[str, StringConstraints(min_length=1, max_length=80)]
+
+
+class StrictEdit(Schema):
+    model_config = ConfigDict(extra='forbid', strict=True)
+
+    @field_validator('*')
+    @classmethod
+    def safe_text(cls, value):
+        if isinstance(value, str) and any(not (char in '\t\n\r' or '\u0020' <= char <= '\ud7ff'
+                                             or '\ue000' <= char <= '\ufffd' or '\U00010000' <= char <= '\U0010ffff') for char in value):
+            raise ValueError('Invalid text character')
+        return value
+
+
+class SpeakerEdit(StrictEdit):
+    id: EntityId
+    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+
+
+class ActionItemEdit(StrictEdit):
+    id: EntityId
+    text: EditText | None = None
+    responsible: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)] | None = None
+    deadline_original: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)] | None = None
+    requires_review: bool | None = None
+
+    @model_validator(mode='after')
+    def actual_changes(self):
+        fields = self.model_fields_set - {'id'}
+        if not fields or any(getattr(self, field) is None for field in fields):
+            raise ValueError('Expected non-null editable fields')
+        return self
+
+
+class MeetingEdits(StrictEdit):
+    speakers: list[SpeakerEdit] = Field(default_factory=list, max_length=1000)
+    action_items: list[ActionItemEdit] = Field(default_factory=list, max_length=10000)
     approve: bool = False
+
+    @model_validator(mode='after')
+    def unique_entities(self):
+        for items in (self.speakers, self.action_items):
+            if len({item.id for item in items}) != len(items):
+                raise ValueError('Duplicate entity IDs')
+        return self

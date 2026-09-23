@@ -2,13 +2,15 @@ from contextlib import asynccontextmanager
 import sqlite3
 
 from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
+from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .api import router
 from . import config
 from .database import initialize_database
-from .errors import LocalError
+from .errors import LocalError, MESSAGES
 from .repository import MeetingRepository
 from .service import MeetingService
 from .sources.storage import MeetingStorage, confined
@@ -41,6 +43,14 @@ async def local_error(request, exc: LocalError):
 @app.exception_handler(sqlite3.Error)
 async def database_error(request, exc):
     return JSONResponse(status_code=503, content={'detail': {'code': 'storage_unavailable', 'message': 'Локальное хранилище временно недоступно. Повторите запрос.'}})
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(request, exc):
+    if request.method == 'PATCH':
+        # Pydantic's default error includes the submitted value: do not echo edits.
+        return JSONResponse(status_code=422, content={'detail': {'code': 'invalid_edits', 'message': MESSAGES['invalid_edits']}})
+    return await request_validation_exception_handler(request, exc)
 
 
 @app.api_route('/api/{path:path}', methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'], include_in_schema=False)

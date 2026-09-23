@@ -1,5 +1,5 @@
 import sqlite3
-from threading import Lock
+from threading import Lock, RLock
 from uuid import uuid4
 
 from .errors import LocalError
@@ -24,6 +24,9 @@ class MeetingService:
         self.repository = repository
         self.preparer = preparer
         self.worker_lock = Lock()
+        # This deployment uses one Uvicorn worker. Review/export/delete share a lock
+        # so bytes are produced from one approved snapshot, never from mixed edits.
+        self.review_lock = RLock()
         self.transcriber = transcriber if transcriber is not None else FasterWhisperAdapter(config.WHISPER_MODEL_PATH)
         self.diarizer = diarizer if diarizer is not None else PyannoteAdapter(config.PYANNOTE_MODEL_PATH)
         self.analyzer = analyzer if analyzer is not None else OllamaAdapter(config.OLLAMA_BASE_URL, config.OLLAMA_MODEL)
@@ -87,6 +90,46 @@ class MeetingService:
                     pass
 
     def delete(self, meeting_id: str):
+        with self.review_lock:
+            self._delete(meeting_id)
+
+    def edit(self, meeting_id: str, edits):
+        with self.review_lock:
+            self.repository.edit(meeting_id, edits)
+            return self.repository.result(meeting_id)
+
+    def export(self, meeting_id: str, format: str):
+        with self.review_lock:
+            result = self.repository.result(meeting_id)  # 404 before approval check.
+            if not result.meeting.approved_at or not result.analysis_completed or result.job.status != 'ready':
+                raise LocalError('not_approved', 409)
+            from .exporting.documents import ProtocolExporter
+            path = None
+            try:
+                path = ProtocolExporter(self.storage, config.LIBREOFFICE_PATH).generate(result, format)
+                path = confined(self.storage.root, path)
+                if path.parent != self.storage.directory(meeting_id):
+                    raise LocalError('unsafe_path', 409)
+                with path.open('rb') as stream:
+                    content = stream.read(32 * 1024 * 1024 + 1)
+                if not content or len(content) > 32 * 1024 * 1024:
+                    raise LocalError('export_failed', 500)
+                self.repository.record_export(meeting_id, format, path)
+                # Read under the lock: delayed FileResponse streaming could race deletion.
+                return content, f'meeting-{result.meeting.id}.{format}'
+            except Exception as exc:
+                if path is not None:
+                    try:
+                        safe = self.storage.file(meeting_id, path.name)
+                        if safe == path:
+                            safe.unlink(missing_ok=True)
+                    except (OSError, LocalError):
+                        pass
+                if isinstance(exc, LocalError):
+                    raise
+                raise LocalError('export_failed', 500) from None
+
+    def _delete(self, meeting_id: str):
         # Serialize the status check and row deletion with status transitions.
         with connect(self.repository.database) as db:
             db.execute('BEGIN IMMEDIATE')

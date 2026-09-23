@@ -1,9 +1,12 @@
 from pathlib import Path
 from uuid import uuid4
+from datetime import datetime, timezone
+import json
+import re
 
 from .database import connect
 from .errors import LocalError, MESSAGES
-from .schemas import Meeting, PreparationResult, ProcessingJob, Speaker, Utterance, Topic, ActionItem, KeyPoint
+from .schemas import Meeting, PreparationResult, ProcessingJob, Speaker, Utterance, Topic, ActionItem, KeyPoint, MeetingEdits
 from .processing.analysis import AnalysisDraft, validate_evidence
 
 ACTIVE_STATUSES = ('queued', 'preparing_audio', 'transcribing', 'diarizing', 'saving_transcript', 'analyzing')
@@ -60,10 +63,58 @@ class MeetingRepository:
 
     def meeting(self, meeting_id: str):
         with connect(self.database) as db:
-            row = db.execute('SELECT id,title,meeting_date,timezone,summary,machine_prepared FROM meetings WHERE id=?', (meeting_id,)).fetchone()
+            row = db.execute('SELECT id,title,meeting_date,timezone,summary,machine_prepared,approved_at,participants_json FROM meetings WHERE id=?', (meeting_id,)).fetchone()
         if row is None:
             raise LocalError('not_found', 404)
-        return Meeting(**dict(row))
+        values = dict(row)
+        values['participants'] = json.loads(values.pop('participants_json'))
+        return Meeting(**values)
+
+    def edit(self, meeting_id: str, edits: MeetingEdits):
+        with connect(self.database) as db:
+            db.execute('BEGIN IMMEDIATE')
+            meeting = db.execute('SELECT id FROM meetings WHERE id=?', (meeting_id,)).fetchone()
+            if meeting is None:
+                raise LocalError('not_found', 404)
+            job = db.execute('SELECT status FROM processing_jobs WHERE meeting_id=?', (meeting_id,)).fetchone()
+            analyzed = db.execute('SELECT 1 FROM analyses WHERE meeting_id=?', (meeting_id,)).fetchone()
+            if job is None or job['status'] != 'ready' or analyzed is None:
+                raise LocalError('result_not_ready', 409)
+            for speaker in edits.speakers:
+                updated = db.execute('UPDATE speakers SET name=? WHERE meeting_id=? AND id=?',
+                                     (speaker.name, meeting_id, speaker.id))
+                if updated.rowcount != 1:
+                    raise LocalError('entity_not_found', 404)
+            for action in edits.action_items:
+                exists = db.execute('SELECT 1 FROM action_items WHERE meeting_id=? AND id=?', (meeting_id, action.id)).fetchone()
+                if exists is None:
+                    raise LocalError('entity_not_found', 404)
+                # SQL column names are constants; no IDs/fields from the request are interpolated.
+                for field in ('text', 'responsible', 'deadline_original', 'requires_review'):
+                    if field in action.model_fields_set:
+                        db.execute(f'UPDATE action_items SET {field}=? WHERE meeting_id=? AND id=?',
+                                   (getattr(action, field), meeting_id, action.id))
+                if 'deadline_original' in action.model_fields_set:
+                    db.execute('UPDATE action_items SET deadline_date=NULL WHERE meeting_id=? AND id=?', (meeting_id, action.id))
+            if edits.speakers:
+                names = [row['name'] for row in db.execute('SELECT name FROM speakers WHERE meeting_id=? ORDER BY rowid', (meeting_id,))
+                         if row['name'] and not re.fullmatch(r'Спикер \d+', row['name'])]
+                db.execute('UPDATE meetings SET participants_json=? WHERE id=?', (json.dumps(list(dict.fromkeys(names)), ensure_ascii=False), meeting_id))
+            if edits.speakers or edits.action_items:
+                db.execute('UPDATE meetings SET approved_at=NULL WHERE id=?', (meeting_id,))
+                # Artifacts are never served by path; existing snapshots become inaccessible.
+                db.execute('DELETE FROM exports WHERE meeting_id=?', (meeting_id,))
+            if edits.approve:
+                pending = db.execute('SELECT 1 FROM action_items WHERE meeting_id=? AND requires_review=1 LIMIT 1', (meeting_id,)).fetchone()
+                if pending is not None:
+                    raise LocalError('review_required', 409)
+                db.execute('UPDATE meetings SET approved_at=COALESCE(approved_at,?) WHERE id=?',
+                           (datetime.now(timezone.utc).isoformat(), meeting_id))
+
+    def record_export(self, meeting_id: str, format: str, path: Path):
+        with connect(self.database) as db:
+            db.execute('INSERT INTO exports VALUES (?,?,?,?,?)',
+                       (str(uuid4()), meeting_id, format, str(path), datetime.now(timezone.utc).isoformat()))
 
     def source(self, meeting_id: str):
         with connect(self.database) as db:
@@ -143,7 +194,11 @@ class MeetingRepository:
             points = [KeyPoint(**dict(row), source_utterance_ids=sources('key_point_sources', 'key_point_id', row['id']))
                       for row in db.execute('SELECT * FROM key_points WHERE meeting_id=? ORDER BY position', (meeting_id,))] if completed else []
         meeting = self.meeting(meeting_id)
+        if meeting.approved_at is not None:
+            for item in [*topics, *points]:
+                item.requires_review = False
         return PreparationResult(meeting=meeting, job=job, models_connected=job.status == 'ready',
                                  detected_language=job.detected_language, speakers=speakers, utterances=utterances,
                                  summary=meeting.summary if completed else '', analysis_completed=completed,
-                                 topics=topics, action_items=actions, key_points=points)
+                                 topics=topics, action_items=actions, key_points=points,
+                                 requires_review=meeting.approved_at is None)

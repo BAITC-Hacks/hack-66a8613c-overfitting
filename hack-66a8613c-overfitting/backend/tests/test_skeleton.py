@@ -47,8 +47,8 @@ class SkeletonTests(unittest.TestCase):
                     client.get('/api/meetings/m/exports/pdf'), client.get('/api/meetings/m/exports/docx'),
                 ]
                 for response in responses:
-                    self.assertEqual(response.status_code, 501)
-                    self.assertEqual(response.json()['detail']['code'], 'not_implemented')
+                    self.assertEqual(response.status_code, 404)
+                    self.assertEqual(response.json()['detail']['code'], 'not_found')
                 self.assertEqual(client.get('/api/unknown').status_code, 404)
                 self.assertEqual(client.get('/api/meetings/m/exports/exe').status_code, 422)
                 self.assertEqual(client.get('/openapi.json').status_code, 200)

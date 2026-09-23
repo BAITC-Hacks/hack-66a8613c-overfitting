@@ -112,7 +112,7 @@ it('renders summary, key points, topics and actions above linked transcript', as
     'Направление / доклад', 'Показатель', 'Проблема', 'Поручение', 'Ответственный', 'Срок',
   ]);
   expect(screen.getByRole('heading', { name: 'Тема 1 — unit topic' })).toBeTruthy();
-  expect(screen.getByText('unit action')).toBeTruthy();
+  expect(screen.getByText('unit action', { selector: 'td' })).toBeTruthy();
   expect(screen.getAllByText('Требует проверки').length).toBe(4);
   const headings = screen.getAllByRole('heading').map(item => item.textContent);
   expect(headings.indexOf('Саммари по ключевым пунктам')).toBeLessThan(headings.indexOf('Транскрипт'));
@@ -150,4 +150,19 @@ it('does not invent actions when the model returned an empty list', async () => 
   fireEvent.click(await screen.findByRole('button', { name: 'Открыть результат' }));
   expect(await screen.findByText('Явные поручения по теме не выделены.')).toBeTruthy();
   expect(screen.queryByRole('columnheader', { name: 'Ответственный' })).toBeNull();
+});
+
+it('updates displayed speaker names from PATCH without reloading the result', async () => {
+  const fetch = vi.fn(async (url: string, init?: RequestInit) => ({ ok: true, status: 200, json: async () =>
+    init?.method === 'PATCH' ? { ...analysisResult, speakers: [{ id: 's', label: 'speaker_1', name: 'Әлия' }] }
+      : url.endsWith('/result') ? analysisResult : { id: 'j', meeting_id: 'm', status: 'ready', message: 'ready', error_code: null },
+  }));
+  vi.stubGlobal('fetch', fetch);
+  render(<App />);
+  fill();
+  fireEvent.click(await screen.findByRole('button', { name: 'Открыть результат' }));
+  fireEvent.change(await screen.findByLabelText('Имя speaker_1'), { target: { value: 'Әлия' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Сохранить правки' }));
+  expect(await screen.findByText('Әлия', { selector: 'strong' })).toBeTruthy();
+  expect(fetch.mock.calls.filter(([url]) => url.endsWith('/result')).length).toBe(1);
 });

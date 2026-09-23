@@ -1,19 +1,12 @@
-from typing import Literal, NoReturn
+from typing import Literal
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, Request, Response
 
-from .schemas import MeetingEdits, MeetingResult, PreparationResult, ProcessingJob
+from .schemas import MeetingEdits, PreparationResult, ProcessingJob
 from .sources.multipart import parse_upload
 from . import config
 
 router = APIRouter(prefix='/api')
-
-
-def not_implemented(operation: str) -> NoReturn:
-    raise HTTPException(501, detail={
-        'code': 'not_implemented', 'operation': operation,
-        'message': 'Эта операция пока не реализована.',
-    })
 
 
 @router.get('/health')
@@ -44,18 +37,24 @@ def meeting_status(meeting_id: str, request: Request):
 
 @router.get('/meetings/{meeting_id}/result', response_model=PreparationResult)
 def meeting_result(meeting_id: str, request: Request):
-    repository = request.app.state.service.repository
-    return repository.result(meeting_id)
+    service = request.app.state.service
+    with service.review_lock:
+        return service.repository.result(meeting_id)
 
 
-@router.patch('/meetings/{meeting_id}', response_model=MeetingResult)
-def edit_meeting(meeting_id: str, edits: MeetingEdits):
-    not_implemented('edit')
+@router.patch('/meetings/{meeting_id}', response_model=PreparationResult)
+def edit_meeting(meeting_id: str, edits: MeetingEdits, request: Request):
+    return request.app.state.service.edit(meeting_id, edits)
 
 
 @router.get('/meetings/{meeting_id}/exports/{format}')
-def download_export(meeting_id: str, format: Literal['docx', 'pdf']):
-    not_implemented('export')
+def download_export(meeting_id: str, format: Literal['docx', 'pdf'], request: Request):
+    content, filename = request.app.state.service.export(meeting_id, format)
+    mime = 'application/pdf' if format == 'pdf' else 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    return Response(content=content, media_type=mime, headers={
+        'Content-Disposition': f'attachment; filename="{filename}"',
+        'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
+    })
 
 
 @router.delete('/meetings/{meeting_id}', status_code=204)

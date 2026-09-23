@@ -110,12 +110,12 @@ class ApiTests(unittest.TestCase):
             self.assertEqual(status['error_code'], missing + '_missing')
             self.assertNotIn(str(self.root), status['message'])
 
-    def test_unknown_result_and_delete_and_unchanged_stubs(self):
+    def test_unknown_result_delete_edit_and_exports(self):
         self.assertEqual(self.client.get('/api/meetings/missing/result').status_code, 404)
         self.assertEqual(self.client.delete('/api/meetings/missing').status_code, 404)
-        self.assertEqual(self.client.patch('/api/meetings/missing', json={}).status_code, 501)
+        self.assertEqual(self.client.patch('/api/meetings/missing', json={}).status_code, 404)
         for extension in ['pdf', 'docx']:
-            self.assertEqual(self.client.get(f'/api/meetings/missing/exports/{extension}').status_code, 501)
+            self.assertEqual(self.client.get(f'/api/meetings/missing/exports/{extension}').status_code, 404)
 
     def test_delete_queued_or_preparing_is_blocked(self):
         meeting_id = self.upload().json()['meeting_id']
