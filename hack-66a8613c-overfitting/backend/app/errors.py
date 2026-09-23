@@ -1,5 +1,11 @@
 """Only predefined descriptions cross API/log boundaries."""
 MESSAGES = {
+    'ollama_configuration': 'Для анализа разрешены только локальный Ollama на 127.0.0.1:11434 и модель qwen3:8b.',
+    'ollama_unavailable': 'Локальный Ollama недоступен или не ответил вовремя. Проверьте запуск сервиса.',
+    'ollama_model_missing': 'Локальная модель qwen3:8b не найдена в Ollama. Подготовьте модель до запуска.',
+    'ollama_invalid_response': 'Ответ локальной модели не прошёл проверку структуры или ссылок на реплики.',
+    'analysis_failed': 'Локальный анализ завершился ошибкой. Транскрипт сохранён.',
+    'analysis_input_too_large': 'Транскрипт превышает доступный объём одного анализа. Загрузите более короткий фрагмент.',
     'whisper_model_missing': 'Локальная модель Whisper отсутствует или неполна. Проверьте WHISPER_MODEL_PATH.',
     'pyannote_model_missing': 'Локальная модель диаризации отсутствует или неполна. Проверьте PYANNOTE_MODEL_PATH.',
     'ml_dependencies_missing': 'ML-зависимости не установлены или недоступны. Установите requirements-ml.txt.',
