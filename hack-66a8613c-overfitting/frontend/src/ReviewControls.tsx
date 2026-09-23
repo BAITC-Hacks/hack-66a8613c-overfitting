@@ -7,22 +7,25 @@ const draftOf = (result: MeetingResult) => ({
     ({ id, text, responsible, deadline_original, requires_review })),
 });
 
-export function ReviewControls({ result, meetingId, busy, onBusy, onResult }: {
+export function ReviewControls({ result, meetingId, busy, onBusy, onResult, blocked = false, onDirty }: {
   result: MeetingResult; meetingId: string; busy: boolean;
   onBusy: (busy: boolean) => void; onResult: (result: MeetingResult) => void;
+  blocked?: boolean; onDirty?: (value: boolean) => void;
 }) {
   const [draft, setDraft] = useState(() => draftOf(result));
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
   useEffect(() => { setDraft(draftOf(result)); }, [result]);
   const dirty = JSON.stringify(draft) !== JSON.stringify(draftOf(result));
+  useEffect(() => { onDirty?.(dirty); }, [dirty, onDirty]);
+  useEffect(() => () => onDirty?.(false), [onDirty]);
   const approved = !!result.meeting?.approved_at;
   const needsReview = draft.action_items.some(item => item.requires_review);
   const valid = draft.speakers.every(item => item.name.trim()) && draft.action_items.every(item =>
     item.text.trim() && item.responsible.trim() && item.deadline_original.trim());
 
   async function patch(approve: boolean) {
-    if (busy || (approve ? dirty || needsReview || approved : !dirty || !valid)) return;
+    if (busy || blocked || (approve ? dirty || needsReview || approved : !dirty || !valid)) return;
     onBusy(true); setNotice(''); setError('');
     try {
       const body = approve ? { approve: true } : {
@@ -42,7 +45,7 @@ export function ReviewControls({ result, meetingId, busy, onBusy, onResult }: {
   }
 
   async function download(format: 'docx' | 'pdf') {
-    if (!approved || dirty || busy) return;
+    if (!approved || dirty || busy || blocked) return;
     onBusy(true); setError(''); setNotice('');
     try { await downloadExport(meetingId, format); setNotice('Документ подготовлен для скачивания.'); }
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Не удалось скачать документ.'); }
@@ -53,9 +56,9 @@ export function ReviewControls({ result, meetingId, busy, onBusy, onResult }: {
 
   return <div className="review-controls">
     <h3>Проверка и утверждение</h3>
-    <p>{approved && !dirty ? 'Результат утверждён человеком.' : 'Экспорт доступен только после сохранения правок и утверждения результата.'}</p>
+    <p>{approved && !dirty && !blocked ? 'Результат утверждён человеком.' : 'Экспорт доступен только после сохранения правок и утверждения результата.'}</p>
     <form onSubmit={save}>
-      <fieldset disabled={busy}>
+      <fieldset disabled={busy || blocked}>
         <legend>Спикеры и поручения</legend>
         <div className="speaker-fields">{draft.speakers.map((speaker, index) => <label key={speaker.id}>
           Имя {result.speakers[index].label}
@@ -86,9 +89,9 @@ export function ReviewControls({ result, meetingId, busy, onBusy, onResult }: {
     {needsReview && <p className="hint">Проверьте поручения и снимите их отметки «требует проверки» перед утверждением.</p>}
     <p className="hint">Нажимая «Утвердить», вы подтверждаете проверку саммари, тем, поручений и транскрипта. Сохранение новых правок отменяет утверждение.</p>
     <div className="actions">
-      <button disabled={busy || dirty || needsReview || approved} onClick={() => void patch(true)}>Утвердить</button>
-      <button disabled={busy || dirty || !approved} onClick={() => void download('docx')}>Скачать DOCX</button>
-      <button disabled={busy || dirty || !approved} onClick={() => void download('pdf')}>Скачать PDF</button>
+      <button disabled={busy || blocked || dirty || needsReview || approved} onClick={() => void patch(true)}>Утвердить</button>
+      <button disabled={busy || blocked || dirty || !approved} onClick={() => void download('docx')}>Скачать DOCX</button>
+      <button disabled={busy || blocked || dirty || !approved} onClick={() => void download('pdf')}>Скачать PDF</button>
     </div>
     {error && <p role="alert">{error}</p>}
     {notice && <p role="status">{notice}</p>}

@@ -8,6 +8,7 @@ from .database import connect
 from .errors import LocalError, MESSAGES
 from .schemas import Meeting, PreparationResult, ProcessingJob, Speaker, Utterance, Topic, ActionItem, KeyPoint, MeetingEdits
 from .processing.analysis import AnalysisDraft, validate_evidence
+from .processing.deadlines import normalize_deadline
 
 ACTIVE_STATUSES = ('queued', 'preparing_audio', 'transcribing', 'diarizing', 'saving_transcript', 'analyzing')
 
@@ -73,7 +74,7 @@ class MeetingRepository:
     def edit(self, meeting_id: str, edits: MeetingEdits):
         with connect(self.database) as db:
             db.execute('BEGIN IMMEDIATE')
-            meeting = db.execute('SELECT id FROM meetings WHERE id=?', (meeting_id,)).fetchone()
+            meeting = db.execute('SELECT id,meeting_date,timezone FROM meetings WHERE id=?', (meeting_id,)).fetchone()
             if meeting is None:
                 raise LocalError('not_found', 404)
             job = db.execute('SELECT status FROM processing_jobs WHERE meeting_id=?', (meeting_id,)).fetchone()
@@ -85,8 +86,22 @@ class MeetingRepository:
                                      (speaker.name, meeting_id, speaker.id))
                 if updated.rowcount != 1:
                     raise LocalError('entity_not_found', 404)
+            for utterance in edits.utterances:
+                if db.execute('SELECT 1 FROM utterances WHERE meeting_id=? AND id=?', (meeting_id, utterance.id)).fetchone() is None:
+                    raise LocalError('entity_not_found', 404)
+                if 'speaker_id' in utterance.model_fields_set and utterance.speaker_id is not None:
+                    if db.execute('SELECT 1 FROM speakers WHERE meeting_id=? AND id=?', (meeting_id, utterance.speaker_id)).fetchone() is None:
+                        raise LocalError('entity_not_found', 404)
+                for field in ('text', 'speaker_id'):
+                    if field in utterance.model_fields_set:
+                        db.execute(f'UPDATE utterances SET {field}=? WHERE meeting_id=? AND id=?',
+                                   (getattr(utterance, field), meeting_id, utterance.id))
+                # Human edits do not silently regenerate or validate the old machine analysis.
+                db.execute('UPDATE action_items SET requires_review=1 WHERE meeting_id=? AND id IN '
+                           '(SELECT action_id FROM action_sources WHERE meeting_id=? AND utterance_id=?)',
+                           (meeting_id, meeting_id, utterance.id))
             for action in edits.action_items:
-                exists = db.execute('SELECT 1 FROM action_items WHERE meeting_id=? AND id=?', (meeting_id, action.id)).fetchone()
+                exists = db.execute('SELECT deadline_original FROM action_items WHERE meeting_id=? AND id=?', (meeting_id, action.id)).fetchone()
                 if exists is None:
                     raise LocalError('entity_not_found', 404)
                 # SQL column names are constants; no IDs/fields from the request are interpolated.
@@ -94,13 +109,15 @@ class MeetingRepository:
                     if field in action.model_fields_set:
                         db.execute(f'UPDATE action_items SET {field}=? WHERE meeting_id=? AND id=?',
                                    (getattr(action, field), meeting_id, action.id))
-                if 'deadline_original' in action.model_fields_set:
-                    db.execute('UPDATE action_items SET deadline_date=NULL WHERE meeting_id=? AND id=?', (meeting_id, action.id))
+                if 'deadline_original' in action.model_fields_set and action.deadline_original != exists['deadline_original']:
+                    normalized = normalize_deadline(action.deadline_original, meeting['meeting_date'], meeting['timezone'])
+                    db.execute('UPDATE action_items SET deadline_date=?, requires_review=CASE WHEN ? IS NULL THEN 1 ELSE requires_review END WHERE meeting_id=? AND id=?',
+                               (normalized.isoformat() if normalized else None, normalized.isoformat() if normalized else None, meeting_id, action.id))
             if edits.speakers:
                 names = [row['name'] for row in db.execute('SELECT name FROM speakers WHERE meeting_id=? ORDER BY rowid', (meeting_id,))
                          if row['name'] and not re.fullmatch(r'Спикер \d+', row['name'])]
                 db.execute('UPDATE meetings SET participants_json=? WHERE id=?', (json.dumps(list(dict.fromkeys(names)), ensure_ascii=False), meeting_id))
-            if edits.speakers or edits.action_items:
+            if edits.speakers or edits.action_items or edits.utterances:
                 db.execute('UPDATE meetings SET approved_at=NULL WHERE id=?', (meeting_id,))
                 # Artifacts are never served by path; existing snapshots become inaccessible.
                 db.execute('DELETE FROM exports WHERE meeting_id=?', (meeting_id,))
@@ -153,6 +170,7 @@ class MeetingRepository:
                 raise LocalError('analysis_failed')
             utterances = [Utterance(**dict(row)) for row in db.execute('SELECT * FROM utterances WHERE meeting_id=?', (meeting_id,))]
             draft = validate_evidence(draft, utterances)
+            meeting = db.execute('SELECT meeting_date,timezone FROM meetings WHERE id=?', (meeting_id,)).fetchone()
             by_id = {item.id: item for item in utterances}
             for position, point in enumerate(draft.key_points, 1):
                 point_id = str(uuid4())
@@ -168,9 +186,10 @@ class MeetingRepository:
                 for action in topic.action_items:
                     action_id = str(uuid4())
                     first = min((by_id[uid] for uid in action.source_utterance_ids), key=lambda u: u.start_seconds)
+                    normalized = normalize_deadline(action.deadline_original, meeting['meeting_date'], meeting['timezone'])
                     db.execute('INSERT INTO action_items VALUES (?,?,?,?,?,?,?,?,?,?)',
                                (action_id, meeting_id, topic_id, action.text, action.responsible, action.deadline_original,
-                                None, first.id, first.start_seconds, action.requires_review))
+                                normalized.isoformat() if normalized else None, first.id, first.start_seconds, action.requires_review or normalized is None))
                     db.executemany('INSERT INTO action_sources VALUES (?,?,?)',
                                    [(meeting_id, action_id, uid) for uid in action.source_utterance_ids])
             db.execute('INSERT INTO analyses VALUES (?,1)', (meeting_id,))

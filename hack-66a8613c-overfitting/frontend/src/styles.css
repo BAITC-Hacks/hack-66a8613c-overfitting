@@ -43,3 +43,8 @@ table { border-collapse: collapse; width: 100%; }
 th, td { border: 1px solid #d9e2eb; text-align: left; padding: 12px; overflow-wrap: anywhere; }
 th { background: #eaf1f8; }
 @media (max-width: 720px) { .columns { grid-template-columns: 1fr; } header { flex-direction: column; gap: 5px; } main { padding: 0 14px; } section { padding: 18px; } }
+
+video { display: block; width: 100%; max-height: 360px; margin: 1rem 0; background: #152838; }
+select { font: inherit; padding: .5rem; max-width: 100%; }
+.transcript-editor details { margin: .5rem 0; }
+.time-link { padding: .2rem .4rem; }

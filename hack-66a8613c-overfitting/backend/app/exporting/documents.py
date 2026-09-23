@@ -95,7 +95,10 @@ def write_docx(result: PreparationResult, path: Path):
                 text += '\nТребует проверки'
             if links:
                 text += '\nИсточники: ' + '; '.join(links)
-            rows.append((text, item.responsible, item.deadline_original))
+            deadline = item.deadline_original
+            if item.deadline_date:
+                deadline += '\nДата: ' + item.deadline_date.isoformat()
+            rows.append((text, item.responsible, deadline))
         table(document, ['Поручение', 'Ответственный', 'Срок'], rows)
 
     document.add_heading('Поручения', 1)

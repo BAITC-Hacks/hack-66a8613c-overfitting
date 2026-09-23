@@ -198,7 +198,7 @@ class ActionItemEdit(StrictEdit):
     id: EntityId
     text: EditText | None = None
     responsible: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)] | None = None
-    deadline_original: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)] | None = None
+    deadline_original: Annotated[str, StringConstraints(min_length=1, max_length=500)] | None = None
     requires_review: bool | None = None
 
     @model_validator(mode='after')
@@ -206,17 +206,32 @@ class ActionItemEdit(StrictEdit):
         fields = self.model_fields_set - {'id'}
         if not fields or any(getattr(self, field) is None for field in fields):
             raise ValueError('Expected non-null editable fields')
+        if self.deadline_original is not None and not self.deadline_original.strip():
+            raise ValueError('Empty deadline')
+        return self
+
+
+class UtteranceEdit(StrictEdit):
+    id: EntityId
+    text: EditText | None = None
+    speaker_id: EntityId | None = None
+
+    @model_validator(mode='after')
+    def actual_changes(self):
+        if not self.model_fields_set - {'id'} or ('text' in self.model_fields_set and self.text is None):
+            raise ValueError('Expected editable fields; only speaker_id may be null')
         return self
 
 
 class MeetingEdits(StrictEdit):
     speakers: list[SpeakerEdit] = Field(default_factory=list, max_length=1000)
+    utterances: list[UtteranceEdit] = Field(default_factory=list, max_length=10000)
     action_items: list[ActionItemEdit] = Field(default_factory=list, max_length=10000)
     approve: bool = False
 
     @model_validator(mode='after')
     def unique_entities(self):
-        for items in (self.speakers, self.action_items):
+        for items in (self.speakers, self.action_items, self.utterances):
             if len({item.id for item in items}) != len(items):
                 raise ValueError('Duplicate entity IDs')
         return self

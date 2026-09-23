@@ -2,7 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { App } from './App';
 
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 function fill() {
   fireEvent.change(screen.getByLabelText('Название встречи'), { target: { value: 'Test' } });
@@ -89,6 +89,7 @@ it('reports result request failure and allows a retry', async () => {
 });
 
 const analysisResult = {
+  meeting: { id: 'm', title: 'Test', approved_at: null as string | null },
   analysis_completed: true, requires_review: true, summary: 'unit summary', detected_language: 'ru',
   speakers: [{ id: 's', label: 'speaker_1', name: 'Спикер 1' }],
   utterances: [{ id: 'u', speaker_id: 's', start_seconds: 1, end_seconds: 2, text: 'unit source', requires_review: false }],
@@ -127,7 +128,7 @@ it('keeps polling and blocks deletion while analysis is running', async () => {
   fill();
   await waitFor(() => expect(screen.getByRole('status').textContent).toBe('analyzing'));
   fireEvent.click(screen.getByRole('button', { name: '2. Результат подготовки' }));
-  expect(await screen.findByText('unit source')).toBeTruthy();
+  expect(await screen.findByText('unit source', { selector: 'p' })).toBeTruthy();
   expect(screen.getByText('Саммари и поручения формируются локально. Транскрипт уже сохранён.')).toBeTruthy();
   expect((screen.getByRole('button', { name: 'Удалить встречу' }) as HTMLButtonElement).disabled).toBe(true);
   expect(screen.queryByText('unit action')).toBeNull();
@@ -138,7 +139,7 @@ it('preserves the transcript and shows analysis error without fabricated summary
   render(<App />);
   fill();
   fireEvent.click(await screen.findByRole('button', { name: 'Открыть результат' }));
-  expect(await screen.findByText('unit source')).toBeTruthy();
+  expect(await screen.findByText('unit source', { selector: 'p' })).toBeTruthy();
   expect(screen.getByText(/Код ошибки: ollama_unavailable/)).toBeTruthy();
   expect(screen.queryByRole('heading', { name: 'Саммари по ключевым пунктам' })).toBeNull();
 });
@@ -165,4 +166,63 @@ it('updates displayed speaker names from PATCH without reloading the result', as
   fireEvent.click(screen.getByRole('button', { name: 'Сохранить правки' }));
   expect(await screen.findByText('Әлия', { selector: 'strong' })).toBeTruthy();
   expect(fetch.mock.calls.filter(([url]) => url.endsWith('/result')).length).toBe(1);
+});
+
+it('seeks the local player only after source or timestamp clicks', async () => {
+  const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue();
+  const scroll = vi.fn();
+  mockAnalysis(); render(<App />); fill();
+  fireEvent.click(await screen.findByRole('button', { name: 'Открыть результат' }));
+  const player = await screen.findByLabelText('Запись встречи') as HTMLVideoElement;
+  expect(player.getAttribute('src')).toBe('/api/meetings/m/media');
+  expect(player.autoplay).toBe(false);
+  expect(play).not.toHaveBeenCalled();
+  document.getElementById('utterance-u')!.scrollIntoView = scroll;
+  fireEvent.click(screen.getAllByRole('link', { name: 'Реплика 00:01.0' })[0]);
+  expect(player.currentTime).toBe(1);
+  expect(play).toHaveBeenCalledTimes(1);
+  expect(scroll).toHaveBeenCalled();
+  player.currentTime = 0;
+  fireEvent.click(screen.getByRole('button', { name: 'Воспроизвести реплику 00:01.0' }));
+  expect(player.currentTime).toBe(1);
+  expect(play).toHaveBeenCalledTimes(2);
+  play.mockRejectedValueOnce(new Error('unsupported'));
+  fireEvent.click(screen.getByRole('button', { name: 'Воспроизвести реплику 00:01.0' }));
+  expect(await screen.findByRole('alert')).toHaveProperty('textContent', expect.stringContaining('Воспроизведение недоступно'));
+});
+
+it('saves transcript and speaker removal, revokes approval and keeps the displayed result fresh', async () => {
+  const approved = { ...analysisResult, meeting: { ...analysisResult.meeting, approved_at: '2026-09-23T00:00:00Z' } };
+  const fetch = vi.fn(async (url: string, init?: RequestInit) => ({ ok: true, status: 200, json: async () =>
+    init?.method === 'PATCH' ? { ...analysisResult, utterances: [{ ...analysisResult.utterances[0], text: 'Түзетілген мәтін', speaker_id: null }] }
+      : url.endsWith('/result') ? approved : { id: 'j', meeting_id: 'm', status: 'ready', message: 'ready', error_code: null },
+  }));
+  vi.stubGlobal('fetch', fetch); render(<App />); fill();
+  fireEvent.click(await screen.findByRole('button', { name: 'Открыть результат' }));
+  expect((await screen.findByRole('button', { name: 'Скачать DOCX' }) as HTMLButtonElement).disabled).toBe(false);
+  fireEvent.change(screen.getByLabelText('Текст реплики 1'), { target: { value: 'Түзетілген мәтін' } });
+  fireEvent.change(screen.getByLabelText('Говорящий реплики 1'), { target: { value: '' } });
+  expect((screen.getByRole('button', { name: 'Скачать DOCX' }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: 'Сохранить реплики' }));
+  expect(await screen.findByText('Түзетілген мәтін', { selector: 'p' })).toBeTruthy();
+  expect(screen.getByText('Спикер не определён', { selector: 'strong' })).toBeTruthy();
+  expect(fetch.mock.calls.filter(([url]) => url.endsWith('/result'))).toHaveLength(1);
+  const body = fetch.mock.calls.find(([, init]) => init?.method === 'PATCH')![1]!.body as string;
+  expect(JSON.parse(body)).toEqual({ utterances: [{ id: 'u', text: 'Түзетілген мәтін', speaker_id: null }] });
+  expect((screen.getByRole('button', { name: 'Скачать DOCX' }) as HTMLButtonElement).disabled).toBe(true);
+});
+
+it('keeps transcript drafts after a safe save error and rejects empty text locally', async () => {
+  const fetch = vi.fn(async (url: string, init?: RequestInit) => init?.method === 'PATCH'
+    ? { ok: false, status: 422, json: async () => ({ detail: { message: 'Не удалось сохранить реплики.' } }) }
+    : { ok: true, status: 200, json: async () => url.endsWith('/result') ? analysisResult
+      : { id: 'j', meeting_id: 'm', status: 'ready', message: 'ready', error_code: null } });
+  vi.stubGlobal('fetch', fetch); render(<App />); fill();
+  fireEvent.click(await screen.findByRole('button', { name: 'Открыть результат' }));
+  fireEvent.change(await screen.findByLabelText('Текст реплики 1'), { target: { value: '   ' } });
+  expect((screen.getByRole('button', { name: 'Сохранить реплики' }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.change(screen.getByLabelText('Текст реплики 1'), { target: { value: 'Правка' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Сохранить реплики' }));
+  expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Не удалось сохранить реплики.');
+  expect((screen.getByLabelText('Текст реплики 1') as HTMLTextAreaElement).value).toBe('Правка');
 });

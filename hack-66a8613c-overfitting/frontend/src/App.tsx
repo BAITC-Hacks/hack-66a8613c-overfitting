@@ -1,6 +1,7 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { active, request, watchStatus, type Job, type MeetingResult } from './api';
 import { ReviewControls } from './ReviewControls';
+import { TranscriptEditor } from './TranscriptEditor';
 
 function timestamp(seconds: number) {
   const minutes = Math.floor(seconds / 60);
@@ -16,6 +17,23 @@ export function App() {
   const [resultError, setResultError] = useState('');
   const [resultAttempt, setResultAttempt] = useState(0);
   const isActive = active(job);
+  const media = useRef<HTMLVideoElement>(null);
+  const pendingTime = useRef<number | null>(null);
+  const [mediaError, setMediaError] = useState('');
+  const [transcriptDirty, setTranscriptDirty] = useState(false);
+  const [reviewDirty, setReviewDirty] = useState(false);
+  useEffect(() => { pendingTime.current = null; setMediaError(''); }, [job?.meeting_id]);
+
+  function playAt(id: string, seconds: number) {
+    document.getElementById(`utterance-${id}`)?.scrollIntoView?.({ block: 'center' });
+    const player = media.current;
+    if (!player) return;
+    pendingTime.current = seconds;
+    setMediaError('');
+    try { player.currentTime = seconds; } catch { /* Apply once metadata arrives. */ }
+    void player.play().catch(() => setMediaError('Воспроизведение недоступно. Проверьте формат записи или нажмите кнопку плеера.'));
+  }
+
 
   useEffect(() => {
     if (!job || !isActive) return;
@@ -107,7 +125,12 @@ export function App() {
         {job?.status === 'ready' && !result && !resultError && <p>Загрузка транскрипта…</p>}
         {resultError && <div role="alert"><p>{resultError}</p><button onClick={() => setResultAttempt(value => value + 1)}>Повторить загрузку транскрипта</button></div>}
         {result && <>
-          {job?.status === 'ready' && result.analysis_completed && <ReviewControls result={result} meetingId={job.meeting_id} busy={busy} onBusy={setBusy} onResult={setResult} />}
+          <video key={job?.meeting_id} ref={media} controls preload="metadata" aria-label="Запись встречи"
+            src={`/api/meetings/${encodeURIComponent(job?.meeting_id ?? '')}/media`}
+            onLoadedMetadata={() => { if (pendingTime.current !== null && media.current) media.current.currentTime = pendingTime.current; }}
+            onError={() => setMediaError('Не удалось воспроизвести локальную запись. Возможно, браузер не поддерживает её кодек.')} />
+          {mediaError && <p role="alert">{mediaError}</p>}
+          {job?.status === 'ready' && result.analysis_completed && <ReviewControls result={result} meetingId={job.meeting_id} busy={busy} onBusy={setBusy} onResult={setResult} blocked={transcriptDirty} onDirty={setReviewDirty} />}
           {result.analysis_completed ? <>
             <h3>Саммари по ключевым пунктам</h3>
             {result.requires_review && <p className="review-label">Требует проверки</p>}
@@ -116,7 +139,7 @@ export function App() {
               <thead><tr><th>Направление / доклад</th><th>Показатель</th><th>Проблема</th></tr></thead>
               <tbody>{result.key_points.map(point => <tr key={point.id}>
                 <td>{point.direction}{point.requires_review && <div className="review-label">Требует проверки</div>}
-                  <SourceLinks ids={point.source_utterance_ids} result={result} /></td>
+                  <SourceLinks ids={point.source_utterance_ids} result={result} onPlay={playAt} /></td>
                 <td>{point.metric}</td><td>{point.problem}</td>
               </tr>)}</tbody>
             </table></div> : <p>Ключевые пункты не выделены.</p>}
@@ -126,13 +149,13 @@ export function App() {
                 <h3>Тема {topic.position} — {topic.title}</h3>
                 <p className="analysis-text">{topic.summary}</p>
                 {topic.requires_review && <p className="review-label">Требует проверки</p>}
-                <SourceLinks ids={topic.source_utterance_ids} result={result} />
+                <SourceLinks ids={topic.source_utterance_ids} result={result} onPlay={playAt} />
                 {actions.length > 0 ? <div className="table-wrap"><table>
                   <thead><tr><th>Поручение</th><th>Ответственный</th><th>Срок</th></tr></thead>
                   <tbody>{actions.map(item => <tr key={item.id}>
                     <td>{item.text}{item.requires_review && <div className="review-label">Требует проверки</div>}
-                      <SourceLinks ids={item.source_utterance_ids} result={result} /></td>
-                    <td>{item.responsible}</td><td>{item.deadline_original}</td>
+                      <SourceLinks ids={item.source_utterance_ids} result={result} onPlay={playAt} /></td>
+                    <td>{item.responsible}</td><td>{item.deadline_original}{item.deadline_date && <div className="hint">Дата: {item.deadline_date}</div>}</td>
                   </tr>)}</tbody>
                 </table></div> : <p>Явные поручения по теме не выделены.</p>}
               </div>;
@@ -143,11 +166,13 @@ export function App() {
           {result.utterances.length === 0 ? <p>{job?.status === 'failed' ? 'Сохранённых реплик нет.' : 'Распознавание завершено. Речевые реплики не обнаружены.'}</p> : <ol className="timeline">
             {result.utterances.map(utterance => <li key={utterance.id} id={`utterance-${utterance.id}`}>
               <div><strong>{result.speakers.find(speaker => speaker.id === utterance.speaker_id)?.name ?? 'Спикер не определён'}</strong>
-                {' · '}<time>{timestamp(utterance.start_seconds)} — {timestamp(utterance.end_seconds)}</time>
+                {' · '}<button className="time-link" onClick={() => playAt(utterance.id, utterance.start_seconds)} aria-label={`Воспроизвести реплику ${timestamp(utterance.start_seconds)}`}><time>{timestamp(utterance.start_seconds)} — {timestamp(utterance.end_seconds)}</time></button>
                 {utterance.requires_review && <span className="hint"> · Требует проверки</span>}</div>
               <p>{utterance.text}</p>
             </li>)}
           </ol>}
+          {job?.status === 'ready' && result.analysis_completed && <TranscriptEditor result={result} meetingId={job.meeting_id}
+            disabled={busy || reviewDirty} onBusy={setBusy} onDirty={setTranscriptDirty} onResult={setResult} />}
         </>}
         <div className="actions">
           <button disabled={!job || busy || isActive} onClick={remove}>Удалить встречу</button></div>
@@ -157,9 +182,9 @@ export function App() {
   </div>;
 }
 
-function SourceLinks({ ids, result }: { ids: string[]; result: MeetingResult }) {
+function SourceLinks({ ids, result, onPlay }: { ids: string[]; result: MeetingResult; onPlay: (id: string, seconds: number) => void }) {
   return <div className="sources">{ids.map(id => {
     const source = result.utterances.find(item => item.id === id);
-    return source ? <a key={id} href={`#utterance-${id}`}>Реплика {timestamp(source.start_seconds)}</a> : null;
+    return source ? <a key={id} href={`#utterance-${id}`} onClick={event => { event.preventDefault(); onPlay(id, source.start_seconds); }}>Реплика {timestamp(source.start_seconds)}</a> : null;
   })}</div>;
 }

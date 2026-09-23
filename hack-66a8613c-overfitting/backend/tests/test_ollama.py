@@ -1,5 +1,6 @@
 import json
 import socket
+import os
 import unittest
 from unittest.mock import Mock, patch
 
@@ -131,3 +132,22 @@ class OllamaTests(unittest.TestCase):
             _audit('socket.connect', (sock, ('203.0.113.1', 80)))
         with local_inference(), self.assertRaises(LocalError):
             _audit('socket.connect', (sock, ('127.0.0.1', 11434)))
+
+    def test_internal_docker_endpoint_is_exact_and_inference_still_has_no_network(self):
+        sock = Mock(family=socket.AF_INET)
+        with patch.dict(os.environ, {'DOCKER_INTERNAL_NETWORK': '1'}):
+            OllamaAdapter('http://172.30.66.3:11434', 'qwen3:8b').analyze(transcript(), [])
+            self.factory.assert_called_once_with('172.30.66.3', 11434, timeout=300)
+            _audit('socket.connect', (sock, ('172.30.66.3', 11434)))
+            _audit('socket.getaddrinfo', ('172.30.66.3', 11434))
+            for host, port in [('172.30.66.3', 80), ('172.30.66.4', 11434), ('203.0.113.1', 11434), ('ollama', 11434)]:
+                with self.assertRaises(LocalError):
+                    _audit('socket.connect', (sock, (host, port)))
+                with self.assertRaises(LocalError):
+                    _audit('socket.getaddrinfo', (host, port))
+            with local_inference(), self.assertRaises(LocalError):
+                _audit('socket.connect', (sock, ('172.30.66.3', 11434)))
+            with self.assertRaises(LocalError):
+                OllamaAdapter('http://203.0.113.1:11434', 'qwen3:8b').analyze([], [])
+        with patch.dict(os.environ, {'DOCKER_INTERNAL_NETWORK': '0'}), self.assertRaises(LocalError):
+            OllamaAdapter('http://172.30.66.3:11434', 'qwen3:8b').analyze([], [])

@@ -73,7 +73,7 @@ class ReviewTests(unittest.TestCase):
         self.assertEqual(action['utterance_id'], self.action.utterance_id)
         self.assertEqual(action['timestamp_seconds'], 1)
         self.assertIsNone(action['deadline_date'])
-        self.assertFalse(action['requires_review'])
+        self.assertTrue(action['requires_review'])
         self.assertEqual(self.client.get(self.url + '/result').json(), body)
 
     def test_validation_rejects_unknown_immutable_null_empty_and_wrong_types(self):
@@ -92,7 +92,7 @@ class ReviewTests(unittest.TestCase):
             {'action_items': [{'id': self.action.id, 'source_utterance_ids': ['other']}]},
             {'speakers': [{'id': self.speaker.id, 'name': 'A'}] * 2},
             {'action_items': [{'id': self.action.id, 'text': 'PRIVATE'}] * 2},
-            {'approve': 'true'}, {'approved_at': '2030-01-01'}, {'utterances': []},
+            {'approve': 'true'}, {'approved_at': '2030-01-01'}, {'utterances': [{'id': 'u', 'text': None}]},
         ]
         for body in invalid:
             with self.subTest(body=body):

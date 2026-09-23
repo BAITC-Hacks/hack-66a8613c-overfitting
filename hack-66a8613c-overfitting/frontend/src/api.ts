@@ -18,7 +18,7 @@ export type MeetingResult = {
   requires_review: boolean;
   key_points: { id: string; direction: string; metric: string; problem: string; source_utterance_ids: string[]; requires_review: boolean }[];
   topics: { id: string; position: number; title: string; summary: string; source_utterance_ids: string[]; requires_review: boolean }[];
-  action_items: { id: string; topic_id: string; text: string; responsible: string; deadline_original: string; source_utterance_ids: string[]; requires_review: boolean }[];
+  action_items: { id: string; topic_id: string; text: string; responsible: string; deadline_original: string; deadline_date?: string | null; source_utterance_ids: string[]; requires_review: boolean }[];
 };
 
 export async function downloadExport(meetingId: string, format: 'docx' | 'pdf') {
