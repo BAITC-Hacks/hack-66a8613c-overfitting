@@ -1,0 +1,78 @@
+name: meeting-minutes
+x-runtime: &runtime
+  image: meeting-minutes:local
+  build:
+    context: .
+    target: runtime
+  platform: linux/amd64
+  init: true
+  user: "${CONTAINER_UID:-1000}:${CONTAINER_GID:-1000}"
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  tmpfs:
+    - /tmp:rw,nosuid,nodev,size=1g,mode=1777
+  shm_size: 1gb
+  stop_grace_period: 45s
+  restart: unless-stopped
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: 1
+            capabilities: [gpu]
+
+services:
+  app:
+    <<: *runtime
+    environment:
+      PORT: "8000"
+      CONTAINER_SERVICE: backend
+      DOCKER_INTERNAL_NETWORK: "1"
+      OLLAMA_BASE_URL: http://172.30.66.3:11434
+    ports:
+      - "127.0.0.1:8000:8000"
+    networks:
+      local:
+        ipv4_address: 172.30.66.2
+    depends_on:
+      ollama:
+        condition: service_healthy
+    volumes:
+      - type: bind
+        source: ${CONTAINER_DATA_DIR:-./data}
+        target: /app/data
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${CONTAINER_MODELS_DIR:-./models}
+        target: /models
+        read_only: true
+        bind:
+          create_host_path: false
+  ollama:
+    <<: *runtime
+    environment:
+      CONTAINER_SERVICE: ollama
+      DOCKER_INTERNAL_NETWORK: "1"
+      OLLAMA_HOST: 172.30.66.3:11434
+      OLLAMA_NO_CLOUD: "1"
+      OLLAMA_MODELS: /models/ollama
+    networks:
+      local:
+        ipv4_address: 172.30.66.3
+    volumes:
+      - type: bind
+        source: ${CONTAINER_MODELS_DIR:-./models}/ollama
+        target: /models/ollama
+        read_only: true
+        bind:
+          create_host_path: false
+
+networks:
+  local:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.30.66.0/24

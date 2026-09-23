@@ -1,0 +1,9 @@
+fastapi==0.136.3
+# Ollama uses Python's http.client + the Pydantic dependency below (no SDK required).
+starlette==1.7.0
+pydantic==2.13.4
+uvicorn==0.41.0
+python-dotenv==1.2.2
+python-multipart==0.0.22
+tzdata==2025.3
+python-docx==1.2.0
