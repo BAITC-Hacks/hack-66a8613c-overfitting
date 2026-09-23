@@ -58,14 +58,14 @@ it('shows safe API errors and accepts empty deletion responses', async () => {
 
 it('continues through ML stages and stops only at ready or failed', async () => {
   vi.useFakeTimers();
-  const states = [job('queued'), { ...job('ready_for_models'), stage: 'models' }, job('transcribing'), job('diarizing'), job('saving_transcript'), job('ready')];
+  const states = [job('queued'), { ...job('ready_for_models'), stage: 'models' }, job('transcribing'), job('diarizing'), job('saving_transcript'), job('analyzing'), job('ready')];
   const fetch = vi.fn();
   for (const state of states) fetch.mockResolvedValueOnce(response(state));
   vi.stubGlobal('fetch', fetch);
   const update = vi.fn();
   const stop = watchStatus('m', update, vi.fn());
   await vi.advanceTimersByTimeAsync(20000);
-  expect(fetch).toHaveBeenCalledTimes(6);
+  expect(fetch).toHaveBeenCalledTimes(7);
   expect(update.mock.calls.map(([value]) => value.status)).toEqual(states.map(value => value.status));
   expect(active(job('ready_for_models'))).toBe(false); // Completed audio from the previous version.
   stop();

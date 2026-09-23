@@ -22,7 +22,7 @@ class SkeletonTests(unittest.TestCase):
             with closing(sqlite3.connect(path)) as connection, connection:
                 connection.execute('PRAGMA foreign_keys = ON')
                 tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-                self.assertEqual(tables, {'meetings', 'source_files', 'processing_jobs', 'speakers', 'utterances', 'topics', 'metrics', 'problems', 'action_items', 'exports'})
+                self.assertEqual(tables, {'meetings', 'source_files', 'processing_jobs', 'speakers', 'utterances', 'topics', 'metrics', 'problems', 'action_items', 'exports', 'analyses', 'key_points', 'topic_sources', 'action_sources', 'key_point_sources'})
                 connection.execute("INSERT INTO meetings(id,title) VALUES ('m','schema test')")
                 connection.execute("INSERT INTO processing_jobs(id,meeting_id,status) VALUES ('a','m','preparing_audio')")
                 with self.assertRaises(sqlite3.IntegrityError):

@@ -27,7 +27,7 @@ export function App() {
   useEffect(() => {
     setResult(null);
     setResultError('');
-    if (!job || job.status !== 'ready') return;
+    if (!job || !['analyzing', 'ready', 'failed'].includes(job.status)) return;
     const controller = new AbortController();
     request<MeetingResult>(`/api/meetings/${job.meeting_id}/result`, { signal: controller.signal })
       .then(value => { if (!controller.signal.aborted) setResult(value); })
@@ -74,8 +74,8 @@ export function App() {
     <header><span className="brand">ПРОТОКОЛ</span><span>Внутренняя система · локальное хранение</span></header>
     <main>
       <h1>Протокол совещания</h1>
-      <p className="intro">Загрузите запись для локального распознавания и определения говорящих.</p>
-      <aside>Машинный транскрипт требует проверки. Анализ, правки и экспорт будут подключены следующим этапом.</aside>
+      <p className="intro">Загрузите запись для локального распознавания, саммари и извлечения поручений.</p>
+      <aside>Машинный транскрипт и анализ требуют проверки человеком. Правки и экспорт пока недоступны.</aside>
       <nav aria-label="Экраны приложения">
         <button aria-current={screen === 'upload' ? 'page' : undefined} onClick={() => setScreen('upload')}>1. Загрузка и статус</button>
         <button aria-current={screen === 'review' ? 'page' : undefined} onClick={() => setScreen('review')}>2. Результат подготовки</button>
@@ -106,10 +106,40 @@ export function App() {
         {job?.status === 'ready' && !result && !resultError && <p>Загрузка транскрипта…</p>}
         {resultError && <div role="alert"><p>{resultError}</p><button onClick={() => setResultAttempt(value => value + 1)}>Повторить загрузку транскрипта</button></div>}
         {result && <>
+          {result.analysis_completed ? <>
+            <h3>Саммари по ключевым пунктам</h3>
+            {result.requires_review && <p className="review-label">Требует проверки</p>}
+            <p className="analysis-text">{result.summary || 'Нет речевых данных для саммари.'}</p>
+            {result.key_points.length > 0 ? <div className="table-wrap"><table>
+              <thead><tr><th>Направление / доклад</th><th>Показатель</th><th>Проблема</th></tr></thead>
+              <tbody>{result.key_points.map(point => <tr key={point.id}>
+                <td>{point.direction}{point.requires_review && <div className="review-label">Требует проверки</div>}
+                  <SourceLinks ids={point.source_utterance_ids} result={result} /></td>
+                <td>{point.metric}</td><td>{point.problem}</td>
+              </tr>)}</tbody>
+            </table></div> : <p>Ключевые пункты не выделены.</p>}
+            {result.topics.map(topic => {
+              const actions = result.action_items.filter(item => item.topic_id === topic.id);
+              return <div key={topic.id} className="topic">
+                <h3>Тема {topic.position} — {topic.title}</h3>
+                <p className="analysis-text">{topic.summary}</p>
+                {topic.requires_review && <p className="review-label">Требует проверки</p>}
+                <SourceLinks ids={topic.source_utterance_ids} result={result} />
+                {actions.length > 0 ? <div className="table-wrap"><table>
+                  <thead><tr><th>Поручение</th><th>Ответственный</th><th>Срок</th></tr></thead>
+                  <tbody>{actions.map(item => <tr key={item.id}>
+                    <td>{item.text}{item.requires_review && <div className="review-label">Требует проверки</div>}
+                      <SourceLinks ids={item.source_utterance_ids} result={result} /></td>
+                    <td>{item.responsible}</td><td>{item.deadline_original}</td>
+                  </tr>)}</tbody>
+                </table></div> : <p>Явные поручения по теме не выделены.</p>}
+              </div>;
+            })}
+          </> : <p className="hint">{job?.status === 'analyzing' ? 'Саммари и поручения формируются локально. Транскрипт уже сохранён.' : 'Результат анализа отсутствует.'}</p>}
           <h3>Транскрипт</h3>
           {result.detected_language && <p className="hint">Начальная оценка языка: {result.detected_language}. Запись может содержать несколько языков.</p>}
-          {result.utterances.length === 0 ? <p>Распознавание завершено. Речевые реплики не обнаружены.</p> : <ol className="timeline">
-            {result.utterances.map(utterance => <li key={utterance.id}>
+          {result.utterances.length === 0 ? <p>{job?.status === 'failed' ? 'Сохранённых реплик нет.' : 'Распознавание завершено. Речевые реплики не обнаружены.'}</p> : <ol className="timeline">
+            {result.utterances.map(utterance => <li key={utterance.id} id={`utterance-${utterance.id}`}>
               <div><strong>{result.speakers.find(speaker => speaker.id === utterance.speaker_id)?.name ?? 'Спикер не определён'}</strong>
                 {' · '}<time>{timestamp(utterance.start_seconds)} — {timestamp(utterance.end_seconds)}</time>
                 {utterance.requires_review && <span className="hint"> · Требует проверки</span>}</div>
@@ -123,4 +153,11 @@ export function App() {
       </section>}
     </main>
   </div>;
+}
+
+function SourceLinks({ ids, result }: { ids: string[]; result: MeetingResult }) {
+  return <div className="sources">{ids.map(id => {
+    const source = result.utterances.find(item => item.id === id);
+    return source ? <a key={id} href={`#utterance-${id}`}>Реплика {timestamp(source.start_seconds)}</a> : null;
+  })}</div>;
 }

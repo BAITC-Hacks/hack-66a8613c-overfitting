@@ -58,14 +58,16 @@ it('blocks deletion while transcription is active', async () => {
   expect((screen.getByRole('button', { name: 'Удалить встречу' }) as HTMLButtonElement).disabled).toBe(true);
 });
 
-it('shows model configuration failure without a transcript', async () => {
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ status: 200, ok: true, json: async () => ({ id: 'j', meeting_id: 'm', status: 'failed', message: 'CUDA недоступна', error_code: 'cuda_unavailable' }) }));
+it('shows model configuration failure without fabricated utterances', async () => {
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => ({ status: 200, ok: true, json: async () => url.endsWith('/result')
+    ? { analysis_completed: false, speakers: [], utterances: [] }
+    : { id: 'j', meeting_id: 'm', status: 'failed', message: 'CUDA недоступна', error_code: 'cuda_unavailable' } })));
   render(<App />);
   fill();
   await waitFor(() => expect(screen.getByRole('status').textContent).toBe('CUDA недоступна'));
   fireEvent.click(screen.getByRole('button', { name: 'Открыть результат' }));
   expect(screen.getByText(/Код ошибки: cuda_unavailable/)).toBeTruthy();
-  expect(screen.queryByRole('heading', { name: 'Транскрипт' })).toBeNull();
+  expect(await screen.findByText('Сохранённых реплик нет.')).toBeTruthy();
 });
 
 it('reports result request failure and allows a retry', async () => {
@@ -84,4 +86,68 @@ it('reports result request failure and allows a retry', async () => {
   fail = false;
   fireEvent.click(retry);
   expect(await screen.findByText('Распознавание завершено. Речевые реплики не обнаружены.')).toBeTruthy();
+});
+
+const analysisResult = {
+  analysis_completed: true, requires_review: true, summary: 'unit summary', detected_language: 'ru',
+  speakers: [{ id: 's', label: 'speaker_1', name: 'Спикер 1' }],
+  utterances: [{ id: 'u', speaker_id: 's', start_seconds: 1, end_seconds: 2, text: 'unit source', requires_review: false }],
+  key_points: [{ id: 'k', direction: 'unit direction', metric: 'не указан', problem: 'unit problem', source_utterance_ids: ['u'], requires_review: true }],
+  topics: [{ id: 't', position: 1, title: 'unit topic', summary: 'unit description', source_utterance_ids: ['u'], requires_review: true }],
+  action_items: [{ id: 'a', topic_id: 't', text: 'unit action', responsible: 'не указан', deadline_original: 'не указан', source_utterance_ids: ['u'], requires_review: true }],
+};
+
+function mockAnalysis(status = 'ready', value = analysisResult) {
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => ({ ok: true, status: 200, json: async () => url.endsWith('/result') ? value
+    : { id: 'j', meeting_id: 'm', status, message: status, error_code: status === 'failed' ? 'ollama_unavailable' : null } })));
+}
+
+it('renders summary, key points, topics and actions above linked transcript', async () => {
+  mockAnalysis();
+  render(<App />);
+  fill();
+  fireEvent.click(await screen.findByRole('button', { name: 'Открыть результат' }));
+  expect(await screen.findByText('unit summary')).toBeTruthy();
+  expect(screen.getAllByRole('columnheader').map(cell => cell.textContent)).toEqual([
+    'Направление / доклад', 'Показатель', 'Проблема', 'Поручение', 'Ответственный', 'Срок',
+  ]);
+  expect(screen.getByRole('heading', { name: 'Тема 1 — unit topic' })).toBeTruthy();
+  expect(screen.getByText('unit action')).toBeTruthy();
+  expect(screen.getAllByText('Требует проверки').length).toBe(4);
+  const headings = screen.getAllByRole('heading').map(item => item.textContent);
+  expect(headings.indexOf('Саммари по ключевым пунктам')).toBeLessThan(headings.indexOf('Транскрипт'));
+  const link = screen.getAllByRole('link', { name: 'Реплика 00:01.0' })[0];
+  expect(link.getAttribute('href')).toBe('#utterance-u');
+  expect(document.getElementById('utterance-u')?.textContent).toContain('unit source');
+});
+
+it('keeps polling and blocks deletion while analysis is running', async () => {
+  mockAnalysis('analyzing', { ...analysisResult, analysis_completed: false, summary: '', topics: [], key_points: [], action_items: [] });
+  render(<App />);
+  fill();
+  await waitFor(() => expect(screen.getByRole('status').textContent).toBe('analyzing'));
+  fireEvent.click(screen.getByRole('button', { name: '2. Результат подготовки' }));
+  expect(await screen.findByText('unit source')).toBeTruthy();
+  expect(screen.getByText('Саммари и поручения формируются локально. Транскрипт уже сохранён.')).toBeTruthy();
+  expect((screen.getByRole('button', { name: 'Удалить встречу' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.queryByText('unit action')).toBeNull();
+});
+
+it('preserves the transcript and shows analysis error without fabricated summary', async () => {
+  mockAnalysis('failed', { ...analysisResult, analysis_completed: false, summary: '', topics: [], key_points: [], action_items: [] });
+  render(<App />);
+  fill();
+  fireEvent.click(await screen.findByRole('button', { name: 'Открыть результат' }));
+  expect(await screen.findByText('unit source')).toBeTruthy();
+  expect(screen.getByText(/Код ошибки: ollama_unavailable/)).toBeTruthy();
+  expect(screen.queryByRole('heading', { name: 'Саммари по ключевым пунктам' })).toBeNull();
+});
+
+it('does not invent actions when the model returned an empty list', async () => {
+  mockAnalysis('ready', { ...analysisResult, action_items: [] });
+  render(<App />);
+  fill();
+  fireEvent.click(await screen.findByRole('button', { name: 'Открыть результат' }));
+  expect(await screen.findByText('Явные поручения по теме не выделены.')).toBeTruthy();
+  expect(screen.queryByRole('columnheader', { name: 'Ответственный' })).toBeNull();
 });

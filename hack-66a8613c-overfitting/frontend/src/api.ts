@@ -1,7 +1,7 @@
 export type Job = {
   id: string;
   meeting_id: string;
-  status: 'queued' | 'preparing_audio' | 'ready_for_models' | 'transcribing' | 'diarizing' | 'saving_transcript' | 'ready' | 'failed';
+  status: 'queued' | 'preparing_audio' | 'ready_for_models' | 'transcribing' | 'diarizing' | 'saving_transcript' | 'analyzing' | 'ready' | 'failed';
   stage?: string | null;
   message: string;
   error_code: string | null;
@@ -12,6 +12,12 @@ export type MeetingResult = {
   detected_language: string | null;
   speakers: { id: string; label: string; name: string | null }[];
   utterances: { id: string; speaker_id: string | null; start_seconds: number; end_seconds: number; text: string; requires_review: boolean }[];
+  summary: string;
+  analysis_completed: boolean;
+  requires_review: boolean;
+  key_points: { id: string; direction: string; metric: string; problem: string; source_utterance_ids: string[]; requires_review: boolean }[];
+  topics: { id: string; position: number; title: string; summary: string; source_utterance_ids: string[]; requires_review: boolean }[];
+  action_items: { id: string; topic_id: string; text: string; responsible: string; deadline_original: string; source_utterance_ids: string[]; requires_review: boolean }[];
 };
 
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -26,7 +32,7 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export function active(job: Job | null): boolean {
-  return !!job && (['queued', 'preparing_audio', 'transcribing', 'diarizing', 'saving_transcript'].includes(job.status)
+  return !!job && (['queued', 'preparing_audio', 'transcribing', 'diarizing', 'saving_transcript', 'analyzing'].includes(job.status)
     || (job.status === 'ready_for_models' && job.stage === 'models'));
 }
 

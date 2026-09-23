@@ -24,6 +24,12 @@ input { font: inherit; width: 100%; padding: 10px; border: 1px solid #b7c7d6; bo
 .timeline li { padding: 16px 0; border-bottom: 1px solid #d9e2eb; }
 .timeline p { white-space: pre-wrap; overflow-wrap: anywhere; margin: 8px 0; }
 .table-wrap { overflow-x: auto; }
+.topic { margin: 28px 0; }
+.analysis-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.review-label { color: #795614; font-size: 14px; }
+.sources { display: flex; flex-wrap: wrap; gap: 10px; font-size: 14px; margin: 8px 0; }
+.sources a { color: #245b89; }
+.timeline li:target { background: #fff5df; }
 table { border-collapse: collapse; width: 100%; }
 th, td { border: 1px solid #d9e2eb; text-align: left; padding: 12px; overflow-wrap: anywhere; }
 th { background: #eaf1f8; }
