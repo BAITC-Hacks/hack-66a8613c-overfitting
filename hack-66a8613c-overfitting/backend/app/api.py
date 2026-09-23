@@ -48,7 +48,8 @@ def edit_meeting(meeting_id: str, edits: MeetingEdits, request: Request):
     return request.app.state.service.edit(meeting_id, edits)
 
 
-@router.api_route('/meetings/{meeting_id}/media', methods=['GET', 'HEAD'])
+@router.get('/meetings/{meeting_id}/media')
+@router.head('/meetings/{meeting_id}/media', include_in_schema=False)
 def meeting_media(meeting_id: str, request: Request):
     return media_response(request.app.state.service, meeting_id, request.headers.get('range'), request.method == 'HEAD')
 

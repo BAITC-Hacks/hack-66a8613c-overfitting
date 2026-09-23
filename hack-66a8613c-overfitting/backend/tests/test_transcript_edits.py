@@ -64,6 +64,10 @@ class TranscriptEditsTests(unittest.TestCase):
 
     def test_deadline_saved_and_recalculated_without_inventing(self):
         self.assertEqual(self.result.action_items[0].deadline_date.isoformat(), '2026-09-24')
+        with connect(self.service.repository.database) as db:
+            db.execute('UPDATE action_items SET deadline_date=NULL WHERE id=?', (self.action.id,))
+        body = self.client.patch(self.url, json={'action_items': [{'id': self.action.id, 'deadline_original': 'завтра'}]}).json()
+        self.assertEqual(body['action_items'][0]['deadline_date'], '2026-09-24')
         for phrase, expected, review in [('  через 2 недели  ', '2026-10-07', False), ('непонятно когда', None, True)]:
             body = self.client.patch(self.url, json={'action_items': [{'id': self.action.id, 'deadline_original': phrase, 'requires_review': False}]}).json()
             action = body['action_items'][0]

@@ -109,10 +109,11 @@ class MeetingRepository:
                     if field in action.model_fields_set:
                         db.execute(f'UPDATE action_items SET {field}=? WHERE meeting_id=? AND id=?',
                                    (getattr(action, field), meeting_id, action.id))
-                if 'deadline_original' in action.model_fields_set and action.deadline_original != exists['deadline_original']:
+                if 'deadline_original' in action.model_fields_set:
                     normalized = normalize_deadline(action.deadline_original, meeting['meeting_date'], meeting['timezone'])
-                    db.execute('UPDATE action_items SET deadline_date=?, requires_review=CASE WHEN ? IS NULL THEN 1 ELSE requires_review END WHERE meeting_id=? AND id=?',
-                               (normalized.isoformat() if normalized else None, normalized.isoformat() if normalized else None, meeting_id, action.id))
+                    needs_review = normalized is None and action.deadline_original != exists['deadline_original']
+                    db.execute('UPDATE action_items SET deadline_date=?, requires_review=CASE WHEN ? THEN 1 ELSE requires_review END WHERE meeting_id=? AND id=?',
+                               (normalized.isoformat() if normalized else None, needs_review, meeting_id, action.id))
             if edits.speakers:
                 names = [row['name'] for row in db.execute('SELECT name FROM speakers WHERE meeting_id=? ORDER BY rowid', (meeting_id,))
                          if row['name'] and not re.fullmatch(r'Спикер \d+', row['name'])]
