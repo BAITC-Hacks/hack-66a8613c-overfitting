@@ -41,7 +41,7 @@ class SkeletonTests(unittest.TestCase):
             from backend.app import main
             importlib.reload(main)
             with TestClient(main.app) as client:
-                self.assertEqual(client.get('/api/health').json()['models'], 'not_connected')
+                self.assertEqual(client.get('/api/health').json()['models'], 'checked_per_job')
                 responses = [
                     client.patch('/api/meetings/m', json={}),
                     client.get('/api/meetings/m/exports/pdf'), client.get('/api/meetings/m/exports/docx'),

@@ -20,6 +20,9 @@ label { display: grid; gap: 6px; font-weight: 600; margin: 16px 0; }
 input { font: inherit; width: 100%; padding: 10px; border: 1px solid #b7c7d6; border-radius: 5px; }
 .hint { font-size: 14px; }
 .empty { background: #f6f8fb; padding: 18px; color: #566b7d; }
+.timeline { list-style: none; padding: 0; }
+.timeline li { padding: 16px 0; border-bottom: 1px solid #d9e2eb; }
+.timeline p { white-space: pre-wrap; overflow-wrap: anywhere; margin: 8px 0; }
 .table-wrap { overflow-x: auto; }
 table { border-collapse: collapse; width: 100%; }
 th, td { border: 1px solid #d9e2eb; text-align: left; padding: 12px; overflow-wrap: anywhere; }

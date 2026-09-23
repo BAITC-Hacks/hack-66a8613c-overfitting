@@ -84,15 +84,16 @@ class ApiTests(unittest.TestCase):
             self.assertEqual(app.state.service.repository.status(source.parent.name).status, 'preparing_audio')
             write_wav(target)
             return PreparedAudio(target, 1)
-        with patch.object(app.state.service.preparer, 'prepare', side_effect=prepare):
+        from backend.app.processing.contracts import Transcription
+        with patch.object(app.state.service.preparer, 'prepare', side_effect=prepare), patch.object(app.state.service.transcriber, 'transcribe', return_value=Transcription(segments=[])), patch.object(app.state.service.diarizer, 'diarize', return_value=[]):
             response = self.upload()
         self.assertEqual(response.json()['status'], 'queued')
         meeting_id = response.json()['meeting_id']
         result = self.client.get(f'/api/meetings/{meeting_id}/result')
         self.assertEqual(result.status_code, 200)
-        self.assertEqual(result.json()['job']['status'], 'ready_for_models')
-        self.assertFalse(result.json()['models_connected'])
-        self.assertNotIn('utterances', result.json())
+        self.assertEqual(result.json()['job']['status'], 'ready')
+        self.assertTrue(result.json()['models_connected'])
+        self.assertEqual(result.json()['utterances'], [])
         self.assertEqual(self.client.delete(f'/api/meetings/{meeting_id}').status_code, 204)
         self.assertFalse((self.root / meeting_id).exists())
         self.assertEqual(self.client.get(f'/api/meetings/{meeting_id}/status').status_code, 404)

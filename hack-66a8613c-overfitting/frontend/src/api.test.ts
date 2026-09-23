@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { request, watchStatus, type Job } from './api';
+import { active, request, watchStatus, type Job } from './api';
 
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
@@ -54,4 +54,19 @@ it('shows safe API errors and accepts empty deletion responses', async () => {
   vi.stubGlobal('fetch', fetch);
   await expect(request('/api/meetings')).rejects.toThrow('Размер файла превышает 200 МБ.');
   await expect(request('/api/meetings/m', { method: 'DELETE' })).resolves.toBeUndefined();
+});
+
+it('continues through ML stages and stops only at ready or failed', async () => {
+  vi.useFakeTimers();
+  const states = [job('queued'), { ...job('ready_for_models'), stage: 'models' }, job('transcribing'), job('diarizing'), job('saving_transcript'), job('ready')];
+  const fetch = vi.fn();
+  for (const state of states) fetch.mockResolvedValueOnce(response(state));
+  vi.stubGlobal('fetch', fetch);
+  const update = vi.fn();
+  const stop = watchStatus('m', update, vi.fn());
+  await vi.advanceTimersByTimeAsync(20000);
+  expect(fetch).toHaveBeenCalledTimes(6);
+  expect(update.mock.calls.map(([value]) => value.status)).toEqual(states.map(value => value.status));
+  expect(active(job('ready_for_models'))).toBe(false); // Completed audio from the previous version.
+  stop();
 });

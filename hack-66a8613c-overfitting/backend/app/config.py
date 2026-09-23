@@ -20,3 +20,5 @@ MAX_UPLOAD_BYTES = 200 * 1024 * 1024
 MAX_DURATION_SECONDS = 15 * 60
 FFMPEG_PATH = os.getenv('FFMPEG_PATH', 'ffmpeg')
 FFPROBE_PATH = os.getenv('FFPROBE_PATH', 'ffprobe')
+WHISPER_MODEL_PATH = local_path('WHISPER_MODEL_PATH', 'models/whisper-large-v3')
+PYANNOTE_MODEL_PATH = local_path('PYANNOTE_MODEL_PATH', 'models/speaker-diarization-community-1')

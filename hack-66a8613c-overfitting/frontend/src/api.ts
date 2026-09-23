@@ -1,9 +1,17 @@
 export type Job = {
   id: string;
   meeting_id: string;
-  status: 'queued' | 'preparing_audio' | 'ready_for_models' | 'failed';
+  status: 'queued' | 'preparing_audio' | 'ready_for_models' | 'transcribing' | 'diarizing' | 'saving_transcript' | 'ready' | 'failed';
+  stage?: string | null;
   message: string;
   error_code: string | null;
+};
+
+export type MeetingResult = {
+  job: Job;
+  detected_language: string | null;
+  speakers: { id: string; label: string; name: string | null }[];
+  utterances: { id: string; speaker_id: string | null; start_seconds: number; end_seconds: number; text: string; requires_review: boolean }[];
 };
 
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -18,7 +26,8 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export function active(job: Job | null): boolean {
-  return job?.status === 'queued' || job?.status === 'preparing_audio';
+  return !!job && (['queued', 'preparing_audio', 'transcribing', 'diarizing', 'saving_transcript'].includes(job.status)
+    || (job.status === 'ready_for_models' && job.stage === 'models'));
 }
 
 export function watchStatus(meetingId: string, onJob: (job: Job) => void, onError: (message: string) => void) {

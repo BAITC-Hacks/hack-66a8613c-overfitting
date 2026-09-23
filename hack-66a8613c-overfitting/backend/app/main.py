@@ -13,10 +13,12 @@ from .repository import MeetingRepository
 from .service import MeetingService
 from .sources.storage import MeetingStorage, confined
 from .processing.audio import AudioPreparer
+from .processing.offline import configure_offline
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    configure_offline()
     storage = MeetingStorage(config.DATA_DIR)
     database = confined(storage.root, config.DATABASE_PATH)
     initialize_database(database)

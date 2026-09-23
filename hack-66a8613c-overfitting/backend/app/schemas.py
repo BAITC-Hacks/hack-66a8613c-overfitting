@@ -14,6 +14,10 @@ class JobStatus(StrEnum):
     queued = 'queued'
     preparing_audio = 'preparing_audio'
     ready_for_models = 'ready_for_models'
+    transcribing = 'transcribing'
+    diarizing = 'diarizing'
+    saving_transcript = 'saving_transcript'
+    ready = 'ready'
     failed = 'failed'
 
 
@@ -54,12 +58,7 @@ class ProcessingJob(Schema):
     stage: str | None = None
     error_code: str | None = None
     message: str = ''
-
-
-class PreparationResult(Schema):
-    meeting: Meeting
-    job: ProcessingJob
-    models_connected: bool = False
+    detected_language: str | None = None
 
 
 class Speaker(Schema):
@@ -83,6 +82,15 @@ class Utterance(Schema):
         if self.end_seconds < self.start_seconds:
             raise ValueError('End precedes start')
         return self
+
+
+class PreparationResult(Schema):
+    meeting: Meeting
+    job: ProcessingJob
+    models_connected: bool = False
+    detected_language: str | None = None
+    speakers: list[Speaker] = Field(default_factory=list)
+    utterances: list[Utterance] = Field(default_factory=list)
 
 
 class Topic(Schema):

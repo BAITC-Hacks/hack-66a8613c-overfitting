@@ -18,7 +18,7 @@ def not_implemented(operation: str) -> NoReturn:
 
 @router.get('/health')
 def health():
-    return {'status': 'ok', 'processing': 'audio_preparation', 'models': 'not_connected'}
+    return {'status': 'ok', 'processing': 'local_transcription', 'models': 'checked_per_job'}
 
 
 @router.post('/meetings', status_code=202, response_model=ProcessingJob, openapi_extra={
@@ -45,7 +45,7 @@ def meeting_status(meeting_id: str, request: Request):
 @router.get('/meetings/{meeting_id}/result', response_model=PreparationResult)
 def meeting_result(meeting_id: str, request: Request):
     repository = request.app.state.service.repository
-    return PreparationResult(meeting=repository.meeting(meeting_id), job=repository.status(meeting_id))
+    return repository.result(meeting_id)
 
 
 @router.patch('/meetings/{meeting_id}', response_model=MeetingResult)
