@@ -2,8 +2,9 @@ import importlib
 from contextlib import closing
 from pathlib import Path
 import sqlite3
-import tempfile
+from backend.tests.helpers import temporary_directory
 import unittest
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
@@ -14,7 +15,7 @@ from backend.app.schemas import Utterance
 
 class SkeletonTests(unittest.TestCase):
     def test_database_models_and_single_worker(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with temporary_directory() as directory:
             path = Path(directory) / 'test.sqlite3'
             initialize_database(path)
             initialize_database(path)
@@ -23,29 +24,27 @@ class SkeletonTests(unittest.TestCase):
                 tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
                 self.assertEqual(tables, {'meetings', 'source_files', 'processing_jobs', 'speakers', 'utterances', 'topics', 'metrics', 'problems', 'action_items', 'exports'})
                 connection.execute("INSERT INTO meetings(id,title) VALUES ('m','schema test')")
-                connection.execute("INSERT INTO processing_jobs(id,meeting_id,status) VALUES ('a','m','processing')")
+                connection.execute("INSERT INTO processing_jobs(id,meeting_id,status) VALUES ('a','m','preparing_audio')")
                 with self.assertRaises(sqlite3.IntegrityError):
-                    connection.execute("INSERT INTO processing_jobs(id,meeting_id,status) VALUES ('b','m','processing')")
+                    connection.execute("INSERT INTO processing_jobs(id,meeting_id,status) VALUES ('b','m','preparing_audio')")
                 with self.assertRaises(sqlite3.IntegrityError):
                     connection.execute("INSERT INTO source_files VALUES ('f','absent','x','x',0,NULL)")
                 connection.execute("DELETE FROM meetings WHERE id='m'")
                 self.assertEqual(connection.execute('SELECT count(*) FROM processing_jobs').fetchone()[0], 0)
 
     def test_no_models_required_and_operations_are_honest(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with temporary_directory() as directory:
             from backend.app import config
-            config.DATA_DIR = Path(directory)
-            config.DATABASE_PATH = Path(directory) / 'test.sqlite3'
+            settings = patch.multiple(config, DATA_DIR=Path(directory), DATABASE_PATH=Path(directory) / 'test.sqlite3')
+            self.addCleanup(settings.stop)
+            settings.start()
             from backend.app import main
             importlib.reload(main)
             with TestClient(main.app) as client:
-                self.assertEqual(client.get('/api/health').json()['processing'], 'not_implemented')
+                self.assertEqual(client.get('/api/health').json()['models'], 'not_connected')
                 responses = [
-                    client.post('/api/meetings', data={'title': 'contract test'}, files={'file': ('empty.wav', b'', 'audio/wav')}),
-                    client.get('/api/meetings/m/status'), client.get('/api/meetings/m/result'),
                     client.patch('/api/meetings/m', json={}),
                     client.get('/api/meetings/m/exports/pdf'), client.get('/api/meetings/m/exports/docx'),
-                    client.delete('/api/meetings/m'),
                 ]
                 for response in responses:
                     self.assertEqual(response.status_code, 501)

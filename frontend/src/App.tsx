@@ -1,9 +1,20 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
+import { active, request, watchStatus, type Job } from './api';
 
 export function App() {
   const [screen, setScreen] = useState<'upload' | 'review'>('upload');
-  const [message, setMessage] = useState('Обработка ещё не реализована. Задач нет.');
+  const [message, setMessage] = useState('Загрузите запись для подготовки аудио.');
+  const [job, setJob] = useState<Job | null>(null);
   const [busy, setBusy] = useState(false);
+  const isActive = active(job);
+
+  useEffect(() => {
+    if (!job || !isActive) return;
+    return watchStatus(job.meeting_id, next => {
+      setJob(next);
+      setMessage(next.message);
+    }, setMessage);
+  }, [job?.meeting_id, isActive]);
 
   async function upload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -15,17 +26,28 @@ export function App() {
     if (file.size > 200 * 1024 * 1024) {
       setMessage('Размер файла превышает 200 МБ.'); return;
     }
+    for (const key of ['meeting_date', 'timezone']) if (!data.get(key)) data.delete(key);
     setBusy(true);
-    setMessage('Ожидание ответа сервера…');
+    setMessage('Сохранение записи…');
     try {
-      const response = await fetch('/api/meetings', { method: 'POST', body: data });
-      if (response.status === 501) {
-        setMessage('Загрузка и обработка пока не реализованы. Запись не сохранена, задача не создана.');
-      } else {
-        setMessage(`Сервер вернул HTTP ${response.status}. Каркас не поддерживает обработку результата.`);
-      }
-    } catch {
-      setMessage('Сервер недоступен. Проверьте запуск backend.');
+      const next = await request<Job>('/api/meetings', { method: 'POST', body: data });
+      setJob(next);
+      setMessage(next.message);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Сервер недоступен. Проверьте запуск backend.');
+    } finally { setBusy(false); }
+  }
+
+  async function remove() {
+    if (!job || isActive) return;
+    setBusy(true);
+    try {
+      await request<void>(`/api/meetings/${job.meeting_id}`, { method: 'DELETE' });
+      setJob(null);
+      setScreen('upload');
+      setMessage('Встреча и её локальные файлы удалены.');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Не удалось удалить встречу.');
     } finally { setBusy(false); }
   }
 
@@ -33,36 +55,39 @@ export function App() {
     <header><span className="brand">ПРОТОКОЛ</span><span>Внутренняя система · локальное хранение</span></header>
     <main>
       <h1>Протокол совещания</h1>
-      <p className="intro">Запись → транскрипт → проверка → утверждённый документ</p>
-      <aside>Каркас прототипа. Распознавание, анализ, сохранение и экспорт пока не реализованы.</aside>
+      <p className="intro">Загрузите запись и подготовьте аудио для локального распознавания.</p>
+      <aside>Доступна подготовка аудио. Распознавание, диаризация, анализ и экспорт будут подключены следующим этапом.</aside>
       <nav aria-label="Экраны приложения">
         <button aria-current={screen === 'upload' ? 'page' : undefined} onClick={() => setScreen('upload')}>1. Загрузка и статус</button>
-        <button aria-current={screen === 'review' ? 'page' : undefined} onClick={() => setScreen('review')}>2. Проверка протокола</button>
+        <button aria-current={screen === 'review' ? 'page' : undefined} onClick={() => setScreen('review')}>2. Результат подготовки</button>
       </nav>
+      <p role="status" aria-live="polite">{message}</p>
       {screen === 'upload' ? <div className="columns">
         <section><h2>Новая встреча</h2>
           <form onSubmit={upload}>
-            <label>Название встречи<input name="title" required placeholder="Введите название" /></label>
-            <label>Дата встречи<input name="meeting_date" type="date" required /></label>
-            <label>Часовой пояс (IANA)<input name="timezone" required defaultValue={Intl.DateTimeFormat().resolvedOptions().timeZone} /></label>
+            <label>Название встречи<input name="title" required maxLength={1000} placeholder="Введите название" /></label>
+            <label>Дата встречи (необязательно)<input name="meeting_date" type="date" /></label>
+            <label>Часовой пояс (IANA, необязательно)<input name="timezone" defaultValue={Intl.DateTimeFormat().resolvedOptions().timeZone} /></label>
             <label>Файл записи<input name="file" type="file" accept=".mp4,.m4a,.mp3,.wav,.webm" required /></label>
-            <p className="hint">MP4, M4A, MP3, WAV, WebM · до 200 МБ и 15 минут. Проверка длительности появится с FFmpeg.</p>
-            <button className="primary" disabled={busy}>{busy ? 'Ожидание…' : 'Отправить в API-заглушку'}</button>
+            <p className="hint">MP4, M4A, MP3, WAV, WebM · до 200 МБ и 15 минут.</p>
+            <button className="primary" disabled={busy || isActive}>{busy ? 'Ожидание…' : 'Загрузить запись'}</button>
           </form>
         </section>
-        <section><h2>Статус обработки</h2><p role="status" aria-live="polite">{message}</p>
-          <p className="hint">После подключения обработчика здесь появятся состояние задачи и текущий этап.</p>
+        <section><h2>Статус подготовки</h2>
+          <p>{job ? job.message : 'Запись ещё не загружена.'}</p>
+          {job && <p className="hint">Идентификатор встречи: {job.meeting_id}</p>}
+          {isActive && <p className="hint">Статус обновляется автоматически каждые 2 секунды.</p>}
+          {job && !isActive && <button onClick={() => setScreen('review')}>Открыть результат</button>}
         </section>
       </div> : <section>
-        <h2>Проверка протокола</h2><p>Результатов пока нет. Здесь будет доступна ручная проверка перед утверждением.</p>
-        <h3>Участники и говорящие</h3><p className="empty">Метки говорящих и поля для имён появятся после диаризации.</p>
-        <h3>Саммари по ключевым пунктам</h3>
-        <div className="table-wrap"><table><thead><tr><th>Направление / доклад</th><th>Показатель</th><th>Проблема</th></tr></thead><tbody><tr><td colSpan={3}>Нет обработанных данных</td></tr></tbody></table></div>
-        <h3>Темы и поручения</h3>
-        <div className="table-wrap"><table><thead><tr><th>Поручение</th><th>Ответственный</th><th>Срок</th><th>Источник / проверка</th></tr></thead><tbody><tr><td colSpan={4}>Поручения появятся после анализа записи</td></tr></tbody></table></div>
-        <h3>Транскрипт</h3><p className="empty">Реплики с временем и говорящими пока отсутствуют.</p>
-        <div className="actions"><button disabled>Сохранить правки</button><button disabled>Утвердить</button><button disabled>Скачать DOCX</button><button disabled>Скачать PDF</button><button disabled>Удалить встречу</button></div>
-        <p className="hint">Редактирование, утверждение, экспорт и удаление ещё не реализованы.</p>
+        <h2>Результат подготовки</h2>
+        <div className="empty">{job?.status === 'ready_for_models'
+          ? 'Аудио подготовлено. Локальные модели распознавания ещё не настроены'
+          : job?.message ?? 'Загрузите запись на первом экране.'}</div>
+        {job?.status === 'ready_for_models' && <p>Формат аудио: WAV, моно, 16 кГц, PCM 16-bit. Транскрипт ещё не создан.</p>}
+        <div className="actions"><button disabled>Сохранить правки</button><button disabled>Утвердить</button><button disabled>Скачать DOCX</button><button disabled>Скачать PDF</button>
+          <button disabled={!job || busy || isActive} onClick={remove}>Удалить встречу</button></div>
+        {isActive && <p className="hint">Удаление доступно после завершения подготовки.</p>}
       </section>}
     </main>
   </div>;

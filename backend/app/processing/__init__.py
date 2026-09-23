@@ -1,4 +1,1 @@
-"""TODO: one sequential local worker: FFmpeg, ASR, diarization, analysis.
-
-No models are imported or downloaded and no inference is implemented yet.
-"""
+"""Local audio preparation. ASR, diarization and analysis are not connected."""

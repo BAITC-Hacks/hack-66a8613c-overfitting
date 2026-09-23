@@ -12,10 +12,10 @@ CREATE TABLE IF NOT EXISTS source_files (
 );
 CREATE TABLE IF NOT EXISTS processing_jobs (
     id TEXT PRIMARY KEY, meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
-    status TEXT NOT NULL CHECK(status IN ('queued','processing','ready','failed')),
-    stage TEXT, error_code TEXT
+    status TEXT NOT NULL CHECK(status IN ('queued','preparing_audio','ready_for_models','failed')),
+    stage TEXT, error_code TEXT, audio_path TEXT
 );
-CREATE UNIQUE INDEX IF NOT EXISTS one_processing_job ON processing_jobs(status) WHERE status = 'processing';
+CREATE UNIQUE INDEX IF NOT EXISTS one_processing_job ON processing_jobs(status) WHERE status = 'preparing_audio';
 CREATE TABLE IF NOT EXISTS speakers (
     id TEXT PRIMARY KEY, meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
     label TEXT NOT NULL, name TEXT, UNIQUE(meeting_id, id), UNIQUE(meeting_id, label)

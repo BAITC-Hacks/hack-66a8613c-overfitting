@@ -12,8 +12,8 @@ class Schema(BaseModel):
 
 class JobStatus(StrEnum):
     queued = 'queued'
-    processing = 'processing'
-    ready = 'ready'
+    preparing_audio = 'preparing_audio'
+    ready_for_models = 'ready_for_models'
     failed = 'failed'
 
 
@@ -53,6 +53,13 @@ class ProcessingJob(Schema):
     status: JobStatus = JobStatus.queued
     stage: str | None = None
     error_code: str | None = None
+    message: str = ''
+
+
+class PreparationResult(Schema):
+    meeting: Meeting
+    job: ProcessingJob
+    models_connected: bool = False
 
 
 class Speaker(Schema):

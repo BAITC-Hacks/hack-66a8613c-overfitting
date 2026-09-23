@@ -1,0 +1,41 @@
+export type Job = {
+  id: string;
+  meeting_id: string;
+  status: 'queued' | 'preparing_audio' | 'ready_for_models' | 'failed';
+  message: string;
+  error_code: string | null;
+};
+
+export async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(path, init);
+  if (response.status === 204) return undefined as T;
+  const body = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(typeof body?.detail?.message === 'string'
+      ? body.detail.message : `Не удалось выполнить запрос (HTTP ${response.status}).`);
+  }
+  return body as T;
+}
+
+export function active(job: Job | null): boolean {
+  return job?.status === 'queued' || job?.status === 'preparing_audio';
+}
+
+export function watchStatus(meetingId: string, onJob: (job: Job) => void, onError: (message: string) => void) {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  async function poll() {
+    try {
+      const job = await request<Job>(`/api/meetings/${meetingId}/status`, { signal: controller.signal });
+      if (controller.signal.aborted) return;
+      onJob(job);
+      if (!active(job)) return;
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      onError(error instanceof Error ? error.message : 'Не удалось получить статус. Повторяем запрос…');
+    }
+    if (!controller.signal.aborted) timer = setTimeout(poll, 2000);
+  }
+  void poll();
+  return () => { controller.abort(); clearTimeout(timer); };
+}
