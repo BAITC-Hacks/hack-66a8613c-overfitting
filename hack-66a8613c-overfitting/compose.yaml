@@ -1,0 +1,41 @@
+name: meeting-minutes
+services:
+  app:
+    image: meeting-minutes:local
+    build:
+      context: .
+      target: runtime
+    platform: linux/amd64
+    # Both processes retain their existing 127.0.0.1 bindings. Linux server target.
+    network_mode: host
+    init: true
+    user: "${CONTAINER_UID:-1000}:${CONTAINER_GID:-1000}"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=1g,mode=1777
+    shm_size: 1gb
+    stop_grace_period: 45s
+    restart: unless-stopped
+    environment:
+      PORT: "8000"
+    volumes:
+      - type: bind
+        source: ${CONTAINER_DATA_DIR:-./data}
+        target: /app/data
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${CONTAINER_MODELS_DIR:-./models}
+        target: /models
+        read_only: true
+        bind:
+          create_host_path: false
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

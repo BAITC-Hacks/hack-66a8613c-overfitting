@@ -17,7 +17,80 @@
 - Собранный frontend раздаётся FastAPI. Запуск через `python -m backend.app` привязан к `127.0.0.1`; access log отключён.
 - `sources` отвечает за загрузку; `processing/audio.py`, `adapters.py`, `alignment.py` — за подготовку WAV, локальные модели и объединение интервалов; `analysis.py` и `ollama.py` — за проверку анализа и локальный HTTP-клиент. `exporting` остаётся заглушкой.
 
-## Подготовка и запуск
+## Запуск через Docker на Linux с NVIDIA GPU
+
+Один контейнер включает FastAPI, собранный React, FFmpeg/FFprobe, Python ML-зависимости и Ollama. Приложение и Ollama запускаются последовательно внутри контейнера, контролируются общим стартовым процессом и завершаются вместе. URL и конвейер обработки не меняются.
+
+На сервере нужны Docker Engine с Compose и настроенный NVIDIA Container Toolkit; драйвер должен поддерживать CUDA 12.8. Dockerfile предназначен для `linux/amd64`. Модели не входят в образ и не скачиваются при старте. Требуемая структура на хосте:
+
+```text
+data/                              # SQLite и записи, доступ на запись
+models/
+  whisper-large-v3/                 # локальная CTranslate2-модель
+  speaker-diarization-community-1/  # полный комплект pyannote
+  ollama/
+    manifests/                     # заранее подготовленная qwen3:8b
+    blobs/
+```
+
+Каталог `models/ollama` — именно хранилище моделей Ollama с manifests/blobs, не одиночный GGUF. Подготовьте его заранее в разрешённой среде. Можно использовать существующее хранилище через структуру общего каталога `models`; каталоги весов подключаются только для чтения.
+
+Из корня проекта на Linux:
+
+```bash
+mkdir -p data models
+# Если .env уже существует, не заменять его.
+test -f .env || cp .env.example .env
+export CONTAINER_UID=$(id -u)
+export CONTAINER_GID=$(id -g)
+docker compose config --quiet
+docker compose build
+docker compose up -d --no-build --pull never
+docker compose ps
+```
+
+Выполняйте запуск от обычного пользователя с доступом к Docker. `data` должен быть доступен ему на запись, веса — на чтение. Приложение не меняет владельца существующих данных. Чтобы сохранить значения UID/GID между терминалами, запишите числовые значения в `.env`. Хостовые пути настраиваются через `CONTAINER_DATA_DIR` и `CONTAINER_MODELS_DIR` (по умолчанию `./data`, `./models`); директории должны существовать. Обычные `DATA_DIR`, пути моделей и FFmpeg из хостового `.env` в контейнер не передаются: там заданы стабильные `/app/data`, `/models`, `/usr/bin/ffmpeg` и `/usr/bin/ffprobe`.
+
+Откройте **http://127.0.0.1:8000** на сервере или через прежний SSH-туннель. Отдельно запускать Python, Vite или Ollama на хосте не нужно. Порты 8000 и 11434 должны быть свободны; контейнер не использует молча уже работающий Ollama.
+
+```bash
+# Проверки без загрузки весов и генерации:
+docker compose exec app python /opt/container/healthcheck.py
+docker compose exec app ollama list
+docker compose exec app nvidia-smi
+
+# Остановка; bind-mounted данные и модели сохраняются:
+docker compose down
+
+# Пересборка после изменения кода:
+docker compose up -d --build
+```
+
+Healthcheck проверяет только доступность API и Ollama, не наличие модели и не работоспособность CUDA. Недостающие веса и ошибки CUDA по-прежнему возвращаются через статус задачи. Вывод дочерних процессов подавлен, чтобы приватные тексты и пути не попали в `docker logs`; контейнер пишет только нейтральное сообщение о запуске или сбое. При падении одного процесса завершаются оба; Compose перезапускает контейнер. Прерванная задача при старте получает прежний `failed/interrupted`, автоматического повторного распознавания нет.
+
+Используется `network_mode: host`, чтобы оба сервиса продолжали слушать только `127.0.0.1`. Порты через Docker не публикуются. Это режим для Linux-сервера; Docker Desktop требует отдельно включённого host networking, и его GPU/сетевой сценарий здесь не подтверждён. Host networking сам по себе **не блокирует исходящую сеть**: сохраняйте запрет исходящего доступа на уровне серверной среды, оставляя loopback. Ollama запускается с `OLLAMA_NO_CLOUD=1`; backend сохраняет свой запрет внешних Python socket/DNS-вызовов. Подробности: [сеть host](https://docs.docker.com/engine/network/drivers/host/) и [GPU в Compose](https://docs.docker.com/compose/how-tos/gpu-support/).
+
+Сборка использует сеть для базовых образов и зависимостей, но `.dockerignore` передаёт в контекст только код и build-файлы: `.env`, записи, SQLite, веса и результаты исключены. Для закрытого контура сначала соберите образ в разрешённой среде и перенесите его отдельно от данных:
+
+```bash
+# На машине подготовки:
+docker save -o meeting-minutes-image.tar meeting-minutes:local
+# На целевом сервере после переноса архива:
+docker load -i meeting-minutes-image.tar
+docker compose up -d --no-build --pull never
+```
+
+Архив образа не добавляйте в Git. Полная сборка объёмная из-за CUDA/PyTorch и Ollama. Для проверки упаковки API/UI/FFmpeg без GPU, Ollama и ML-пакетов есть отдельная цель:
+
+```bash
+docker build --target smoke -t meeting-minutes:smoke .
+docker run --rm --network host --user "$(id -u):$(id -g)" \
+  --mount type=bind,src="$PWD/data",dst=/app/data meeting-minutes:smoke
+```
+
+Эта цель не заменяет полный GPU-образ: обработка остановится с честной ошибкой отсутствующих моделей/ML-зависимостей.
+
+## Подготовка и запуск без Docker
 
 Нужны Python 3.12, Node.js 22.12+ (проверено на 24.19), pnpm 11 и локальные FFmpeg/FFprobe. Для транскрипции нужны CUDA и локальные веса, для анализа — локальный Ollama с заранее подготовленной qwen3:8b (разделы ниже). Первичная подготовка зависимостей может использовать сеть; рабочий тракт использует локальные файлы и разрешённый loopback-запрос к Ollama. Запускайте команды из корня репозитория.
 
